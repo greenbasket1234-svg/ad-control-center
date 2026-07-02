@@ -116,22 +116,57 @@ const NAV_DISABLED=[
 
 /* ──────── Dashboard ──────── */
 function Dashboard({advertisers}){
-  const [period,setPeriod]=useState("7");
+  const [period,setPeriod]=useState("30");
+  const [channelStats,setChannelStats]=useState({});
+  const [channelMix,setChannelMix]=useState([]);
+  const [loading,setLoading]=useState(true);
   const channels=["meta","naver","google","daangn","tiktok","kakao"];
-  const totalCost=advertisers.reduce((s,a)=>s+a.stats.cost,0);
-  const totalImpr=advertisers.reduce((s,a)=>s+a.stats.impressions,0);
-  const totalClk=advertisers.reduce((s,a)=>s+a.stats.clicks,0);
-  const totalConv=advertisers.reduce((s,a)=>s+a.stats.conversions,0);
-  const totalAmt=advertisers.reduce((s,a)=>s+a.stats.convAmount,0);
 
-  const channelStats={
-    meta:{cost:602060,impressions:47807,clicks:1977,conversions:0,convAmount:0},
-    naver:{cost:1158930,impressions:55702,clicks:586,conversions:11,convAmount:409100},
-    daangn:{cost:52815,impressions:0,clicks:0,conversions:0,convAmount:0},
-    kakao:{cost:0,impressions:0,clicks:0,conversions:0,convAmount:0},
-    google:{cost:0,impressions:0,clicks:0,conversions:0,convAmount:0},
-    tiktok:{connected:false},
+  function getDateRange(p){
+    const end=new Date(); end.setDate(end.getDate()-1);
+    const start=new Date(end);
+    const days={"7":7,"14":14,"30":30,"60":60,"90":90,"오늘":0,"어제":1}[p]||30;
+    if(p==="오늘"){ const t=new Date(); return{startDate:t.toISOString().slice(0,10),endDate:t.toISOString().slice(0,10)}; }
+    start.setDate(end.getDate()-(days-1));
+    return{startDate:start.toISOString().slice(0,10),endDate:end.toISOString().slice(0,10)};
+  }
+
+  const loadStats=async()=>{
+    setLoading(true);
+    const {startDate,endDate}=getDateRange(period);
+    try{
+      const [byChannel,mix]=await Promise.all([
+        apiFetch(`/stats/by-channel?startDate=${startDate}&endDate=${endDate}`),
+        apiFetch(`/stats/channel-mix?startDate=${startDate}&endDate=${endDate}`)
+      ]);
+      const statsMap={};
+      (byChannel||[]).forEach(r=>{ statsMap[r.channel]={
+        cost:Number(r.cost||0), impressions:Number(r.impressions||0),
+        clicks:Number(r.clicks||0), conversions:Number(r.conversions||0),
+        convAmount:Number(r.conversion_amount||0),
+        ctr:Number(r.ctr||0), cpc:Number(r.cpc||0), cpm:Number(r.cpm||0), roas:Number(r.roas||0)
+      };});
+      setChannelStats(statsMap);
+      setChannelMix(mix||[]);
+    }catch(e){ console.error(e); }
+    finally{ setLoading(false); }
   };
+
+  useEffect(()=>{ loadStats(); },[period]);
+
+  const totalCost=Object.values(channelStats).reduce((s,v)=>s+(v.cost||0),0);
+  const totalImpr=Object.values(channelStats).reduce((s,v)=>s+(v.impressions||0),0);
+  const totalClk=Object.values(channelStats).reduce((s,v)=>s+(v.clicks||0),0);
+  const totalConv=Object.values(channelStats).reduce((s,v)=>s+(v.conversions||0),0);
+  const totalAmt=Object.values(channelStats).reduce((s,v)=>s+(v.convAmount||0),0);
+
+  // 광고주별 채널 합산
+  const advCostMap={};
+  channelMix.forEach(r=>{
+    if(!advCostMap[r.id]) advCostMap[r.id]={name:r.name,color:r.brand_color,budget:Number(r.monthly_budget||0),total:0,channels:{}};
+    advCostMap[r.id].total+=Number(r.cost||0);
+    advCostMap[r.id].channels[r.channel]=Number(r.cost||0);
+  });
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -149,27 +184,35 @@ function Dashboard({advertisers}){
               ))}
             </div>
           </div>
-          <span style={{fontSize:11,color:"#9ca3af"}}>최근 30일 기준</span>
+          <span style={{fontSize:11,color:"#9ca3af"}}>최근 {period}일 기준</span>
         </div>
-        {advertisers.map(adv=>{
-          const pctNum=(adv.stats.cost/totalCost*100)||0;
-          const connectedChs=Object.entries(adv.accounts).filter(([,v])=>v.connected).map(([k])=>k);
-          return(
-            <div key={adv.id} style={{marginBottom:16}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                <span style={{fontWeight:700,fontSize:13}}>{adv.name}</span>
-                <span style={{fontSize:12,color:"#6b7280"}}><b style={{color:"#1a1d23"}}>{fmtW(adv.stats.cost)}</b>
-                  {connectedChs.map(ch=>(
-                    <span key={ch}> · {CHANNEL_LABELS[ch]} {fmtW(adv.stats.cost)}</span>
+        {loading?(
+          <div style={{color:"#9ca3af",fontSize:13,padding:"10px 0"}}>데이터 불러오는 중...</div>
+        ):Object.keys(advCostMap).length===0?(
+          <div style={{color:"#9ca3af",fontSize:13,padding:"10px 0"}}>수집된 데이터가 없습니다. 배치를 실행해주세요.</div>
+        ):(
+          Object.values(advCostMap).map(adv=>{
+            const pct=totalCost>0?(adv.total/totalCost*100):0;
+            return(
+              <div key={adv.name} style={{marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                  <span style={{fontWeight:700,fontSize:13}}>{adv.name}</span>
+                  <span style={{fontSize:12,color:"#6b7280"}}>
+                    <b style={{color:"#1a1d23"}}>{fmtW(adv.total)}</b>
+                    {Object.entries(adv.channels).map(([ch,cost])=>(
+                      <span key={ch}> · {CHANNEL_LABELS[ch]} {fmtW(cost)}</span>
+                    ))}
+                  </span>
+                </div>
+                <div style={{height:9,borderRadius:5,background:"#f0f2f5",overflow:"hidden",display:"flex"}}>
+                  {Object.entries(adv.channels).map(([ch,cost])=>(
+                    <div key={ch} style={{width:`${adv.total>0?cost/adv.total*100:0}%`,background:COLORS[ch]}}/>
                   ))}
-                </span>
+                </div>
               </div>
-              <div style={{height:9,borderRadius:5,background:"#f0f2f5",overflow:"hidden",display:"flex"}}>
-                <div style={{width:`${pctNum}%`,background:adv.color}}/>
-              </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
         <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>전체 합계 {fmtW(totalCost)} · 연결된 채널 데이터를 자동 합산합니다</div>
       </div>
 
@@ -195,8 +238,8 @@ function Dashboard({advertisers}){
               ))}</tr>
             </thead>
             <tbody>
-              {Object.entries(channelStats).map(([ch,s])=>{
-                if(ch==="tiktok")return(
+              {channels.map(ch=>{
+                if(ch==="tiktok") return(
                   <tr key={ch}>
                     <td style={{padding:"12px 10px",fontWeight:600}}>
                       틱톡 <span style={{fontSize:10,background:"#f3f4f6",color:"#9ca3af",padding:"2px 7px",borderRadius:999,fontWeight:700,marginLeft:4}}>연동 대기</span>
@@ -204,22 +247,24 @@ function Dashboard({advertisers}){
                     {Array(11).fill(0).map((_,i)=><td key={i} style={{textAlign:"right",padding:"12px 10px",color:"#d1d5db"}}>-</td>)}
                   </tr>
                 );
+                const s=channelStats[ch]||{cost:0,impressions:0,clicks:0,conversions:0,convAmount:0};
                 const cpm=s.impressions?(s.cost/s.impressions*1000).toFixed(0):"-";
                 const ctr=s.impressions?(s.clicks/s.impressions*100).toFixed(2)+"%":"-";
                 const cpc=s.clicks?(s.cost/s.clicks).toFixed(0):"-";
                 const cvr=s.clicks?(s.conversions/s.clicks*100).toFixed(2)+"%":"-";
                 const cpa=s.conversions?(s.cost/s.conversions).toFixed(0):"-";
                 const roas=s.cost?(s.convAmount/s.cost*100).toFixed(0):"-";
+                const hasData=s.cost>0||s.impressions>0;
                 return(
-                  <tr key={ch} style={{borderBottom:"1px solid #f9fafb"}}>
+                  <tr key={ch} style={{borderBottom:"1px solid #f9fafb",opacity:hasData?1:0.4}}>
                     <td style={{padding:"12px 10px",fontWeight:600}}>{CHANNEL_LABELS[ch]}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{fmtW(s.cost)}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{s.impressions.toLocaleString()}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{hasData?fmtW(s.cost):"-"}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{hasData?s.impressions.toLocaleString():"-"}</td>
                     <td style={{textAlign:"right",padding:"12px 10px"}}>{cpm==="-"?"-":`₩${Number(cpm).toLocaleString()}`}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{s.clicks.toLocaleString()}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{hasData?s.clicks.toLocaleString():"-"}</td>
                     <td style={{textAlign:"right",padding:"12px 10px"}}>{ctr}</td>
                     <td style={{textAlign:"right",padding:"12px 10px"}}>{cpc==="-"?"-":`₩${Number(cpc).toLocaleString()}`}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{s.conversions}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{hasData?s.conversions:"-"}</td>
                     <td style={{textAlign:"right",padding:"12px 10px"}}>{cvr}</td>
                     <td style={{textAlign:"right",padding:"12px 10px"}}>{s.convAmount?fmtW(s.convAmount):"-"}</td>
                     <td style={{textAlign:"right",padding:"12px 10px"}}>{cpa==="-"?"-":`₩${Number(cpa).toLocaleString()}`}</td>
@@ -231,15 +276,15 @@ function Dashboard({advertisers}){
                 <td style={{padding:"12px 10px"}}>전체 합산<div style={{fontSize:11,fontWeight:400,color:"#9ca3af",marginTop:2}}>모든 매체</div></td>
                 <td style={{textAlign:"right",padding:"12px 10px"}}>{fmtW(totalCost)}</td>
                 <td style={{textAlign:"right",padding:"12px 10px"}}>{totalImpr.toLocaleString()}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>₩{Math.round(totalCost/totalImpr*1000).toLocaleString()}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalImpr?`₩${Math.round(totalCost/totalImpr*1000).toLocaleString()}`:"-"}</td>
                 <td style={{textAlign:"right",padding:"12px 10px"}}>{totalClk.toLocaleString()}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{(totalClk/totalImpr*100).toFixed(2)}%</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>₩{Math.round(totalCost/totalClk).toLocaleString()}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalImpr?(totalClk/totalImpr*100).toFixed(2)+"%":"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalClk?`₩${Math.round(totalCost/totalClk).toLocaleString()}`:"-"}</td>
                 <td style={{textAlign:"right",padding:"12px 10px"}}>{totalConv}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{(totalConv/totalClk*100).toFixed(2)}%</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{fmtW(totalAmt)}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>₩{Math.round(totalCost/totalConv).toLocaleString()}</td>
-                <td style={{textAlign:"right",padding:"12px 10px",color:"#16a34a"}}>{Math.round(totalAmt/totalCost*100)}%</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalClk?(totalConv/totalClk*100).toFixed(2)+"%":"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalAmt?fmtW(totalAmt):"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalConv?`₩${Math.round(totalCost/totalConv).toLocaleString()}`:"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px",color:"#16a34a"}}>{totalCost?Math.round(totalAmt/totalCost*100)+"%":"-"}</td>
               </tr>
             </tbody>
           </table>
@@ -252,22 +297,25 @@ function Dashboard({advertisers}){
         {/* Budget */}
         <div style={{...card,flex:1}}>
           <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>브랜드별 예산 소진율</div>
-          {advertisers.map(adv=>{
-            const p=adv.stats.cost/adv.budget*100;
+          {Object.values(advCostMap).length===0?(
+            <div style={{fontSize:13,color:"#9ca3af"}}>수집된 데이터가 없습니다</div>
+          ):Object.values(advCostMap).map(adv=>{
+            const budget=advertisers.find(a=>a.name===adv.name)?.budget||0;
+            const p=budget>0?(adv.total/budget*100):0;
             return(
-              <div key={adv.id} style={{marginBottom:16}}>
+              <div key={adv.name} style={{marginBottom:16}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                   <span style={{display:"flex",alignItems:"center",gap:7,fontWeight:600,fontSize:13}}>
                     <span style={{width:8,height:8,borderRadius:2,background:adv.color,display:"inline-block"}}/>
                     {adv.name}
                   </span>
                   <span style={{fontSize:12,color:"#6b7280"}}>
-                    {fmtW(adv.stats.cost)} / {fmtW(adv.budget)}
-                    <span style={{marginLeft:8,background:"#eafaf0",color:"#16a34a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:5}}>{p.toFixed(1)}%</span>
+                    {fmtW(adv.total)} / {budget?fmtW(budget):"-"}
+                    {budget>0&&<span style={{marginLeft:8,background:"#eafaf0",color:"#16a34a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:5}}>{p.toFixed(1)}%</span>}
                   </span>
                 </div>
                 <div style={{height:8,borderRadius:5,background:"#f0f2f5",overflow:"hidden"}}>
-                  <div style={{width:`${p}%`,height:"100%",background:adv.color,borderRadius:5}}/>
+                  <div style={{width:`${Math.min(p,100)}%`,height:"100%",background:adv.color,borderRadius:5}}/>
                 </div>
               </div>
             );
