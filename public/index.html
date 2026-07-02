@@ -449,12 +449,46 @@ function AdvModal({adv,onSave,onClose}){
   );
 }
 
+/* ──────── Toast 알림 ──────── */
+function Toast({toasts}){
+  return(
+    <div style={{position:"fixed",bottom:24,right:24,zIndex:999,display:"flex",flexDirection:"column",gap:10}}>
+      {toasts.map(t=>(
+        <div key={t.id} style={{
+          display:"flex",alignItems:"center",gap:10,
+          padding:"12px 18px",borderRadius:12,
+          background:t.type==="success"?"#16a34a":t.type==="error"?"#e35353":"#2563eb",
+          color:"#fff",fontSize:13,fontWeight:600,
+          boxShadow:"0 4px 20px rgba(0,0,0,.15)",
+          minWidth:240,maxWidth:360,
+          animation:"slideIn .2s ease"
+        }}>
+          <span style={{fontSize:16}}>{t.type==="success"?"✓":t.type==="error"?"✕":"ℹ"}</span>
+          <span>{t.message}</span>
+        </div>
+      ))}
+      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
+    </div>
+  );
+}
+
+function useToast(){
+  const [toasts,setToasts]=useState([]);
+  const show=(message,type="success")=>{
+    const id=Date.now();
+    setToasts(prev=>[...prev,{id,message,type}]);
+    setTimeout(()=>setToasts(prev=>prev.filter(t=>t.id!==id)),3500);
+  };
+  return {toasts, showToast:show};
+}
+
 /* ──────── Accounts Page ──────── */
-function AccountsPage({advertisers,setAdvertisers,onReload}){
+function AccountsPage({advertisers,setAdvertisers,onReload,isAdmin}){
   const [modal,setModal]=useState(null);
   const [saving,setSaving]=useState(false);
-  const [testStatus,setTestStatus]=useState({}); // {advertiserId_channel: {loading,ok,message}}
+  const [testStatus,setTestStatus]=useState({});
   const channels=["meta","naver","google","daangn","tiktok","kakao"];
+  const {toasts,showToast}=useToast();
 
   const handleSave=async(data)=>{
     setSaving(true);
@@ -469,26 +503,35 @@ function AccountsPage({advertisers,setAdvertisers,onReload}){
           body: JSON.stringify({ name:data.name, brand_color:data.color, monthly_budget:data.budget, accounts })
         });
         advertiserId = created.id;
+        showToast(`${data.name} 광고주가 등록됐습니다`, "success");
       } else {
         await apiFetch(`/advertisers/${modal.id}`, {
           method:"PUT",
           body: JSON.stringify({ name:data.name, brand_color:data.color, monthly_budget:data.budget, accounts })
         });
         advertiserId = modal.id;
+        showToast(`${data.name} 정보가 저장됐습니다`, "success");
       }
 
       // 저장 완료 후 연결된 채널 자동 연동 테스트
+      const testResults=[];
       for(const ch of connectedChannels){
         const creds = data.accounts[ch];
         const hasCreds = Object.values(creds).some(v=>v&&v!=="***"&&v!==true&&v!==false);
         if(hasCreds){
           try {
-            await apiFetch(`/advertisers/${advertiserId}/channels/${ch}/test`, {
+            const result = await apiFetch(`/advertisers/${advertiserId}/channels/${ch}/test`, {
               method:"POST",
               body: JSON.stringify({ credentials: creds })
             });
+            testResults.push({ch, ok:result.ok, message:result.message});
+            if(result.ok){
+              showToast(`${CHANNEL_LABELS[ch]} 연동 성공 ✓`, "success");
+            } else {
+              showToast(`${CHANNEL_LABELS[ch]} 연동 실패: ${result.message}`, "error");
+            }
           } catch(e) {
-            console.warn(`${ch} 연동 테스트 실패:`, e.message);
+            showToast(`${CHANNEL_LABELS[ch]} 연동 오류: ${e.message}`, "error");
           }
         }
       }
@@ -496,7 +539,7 @@ function AccountsPage({advertisers,setAdvertisers,onReload}){
       await onReload();
       setModal(null);
     } catch(e) {
-      alert("저장 실패: "+e.message);
+      showToast("저장 실패: "+e.message, "error");
     } finally {
       setSaving(false);
     }
@@ -526,6 +569,7 @@ function AccountsPage({advertisers,setAdvertisers,onReload}){
 
   return(
     <div>
+      <Toast toasts={toasts}/>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22}}>
         <div>
           <div style={{fontWeight:700,fontSize:20}}>광고주 관리</div>
