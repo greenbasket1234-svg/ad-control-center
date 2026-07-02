@@ -373,15 +373,13 @@ function AdvModal({adv,onSave,onClose}){
             <div key={ch}>
               {i>0&&<div style={{height:1,background:"#f0f2f5",margin:"16px 0"}}/>}
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:enabled[ch]?12:0}}>
-                <label style={{display:"flex",alignItems:"center",cursor:"pointer"}}>
-                  <div style={{position:"relative",width:38,height:22}}>
-                    <input type="checkbox" checked={enabled[ch]} onChange={e=>setEnabled(v=>({...v,[ch]:e.target.checked}))} style={{opacity:0,width:0,height:0,position:"absolute"}}/>
-                    <div style={{position:"absolute",inset:0,background:enabled[ch]?"#2563eb":"#e5e7eb",borderRadius:999,transition:".2s",cursor:"pointer"}}
-                         onClick={()=>setEnabled(v=>({...v,[ch]:!v[ch]}))}>
-                      <div style={{position:"absolute",width:16,height:16,background:"#fff",borderRadius:"50%",top:3,left:enabled[ch]?19:3,transition:".2s"}}/>
-                    </div>
+                <div
+                  onClick={()=>setEnabled(v=>({...v,[ch]:!v[ch]}))}
+                  style={{position:"relative",width:38,height:22,flexShrink:0,cursor:"pointer"}}>
+                  <div style={{position:"absolute",inset:0,background:enabled[ch]?"#2563eb":"#e5e7eb",borderRadius:999,transition:".2s"}}>
+                    <div style={{position:"absolute",width:16,height:16,background:"#fff",borderRadius:"50%",top:3,left:enabled[ch]?19:3,transition:".2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
                   </div>
-                </label>
+                </div>
                 <span style={{fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:7}}>
                   <span style={{width:20,height:20,borderRadius:5,background:cfg.bg,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,color:ch==="kakao"?"#111":"#fff",fontWeight:700}}>
                     {ch==="daangn"?"당":ch[0].toUpperCase()}
