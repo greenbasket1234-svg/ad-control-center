@@ -310,27 +310,8 @@ function Dashboard({advertisers}){
   );
 }
 
-/* ──────── Advertiser Modal ──────── */
-function AdvModal({adv,onSave,onClose}){
-  const channels=["naver","meta","google","daangn","tiktok","kakao"];
-  const isEdit=!!adv;
-  const [name,setName]=useState(adv?.name||"");
-  const [color,setColor]=useState(adv?.color||BRAND_COLORS[0]);
-  const [budget,setBudget]=useState(adv?.budget||"");
-  const [saving,setSaving]=useState(false);
-  const [enabled,setEnabled]=useState(()=>{
-    const init={};
-    channels.forEach(ch=>{ init[ch]=adv?.accounts?.[ch]?.connected||false; });
-    return init;
-  });
-  const [fields,setFields]=useState(()=>{
-    const init={};
-    channels.forEach(ch=>{ init[ch]={...((adv?.accounts?.[ch])||{})}; });
-    return init;
-  });
-
-  const setField=(ch,key,val)=>setFields(f=>({...f,[ch]:{...f[ch],[key]:val}}));
-
+/* ──────── Channel Key Modal (채널별 개별 등록) ──────── */
+function ChannelKeyModal({advertiserId, channel, onClose, onSuccess}){
   const chConfig={
     naver:{label:"네이버 검색광고",bg:"#16a34a",inputs:[
       {k:"apiKey",label:"API Key (Access License)",pw:true,ph:"발급받은 API Key"},
@@ -361,19 +342,96 @@ function AdvModal({adv,onSave,onClose}){
     ]},
   };
 
-  const handleSave=async()=>{
-    if(!name.trim()) return;
+  const cfg = chConfig[channel];
+  const [fields, setFields] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const handleSave = async() => {
+    // 빈 값 체크
+    const missing = cfg.inputs.filter(({k})=>!fields[k]?.trim());
+    if(missing.length>0){
+      alert(`${missing.map(m=>m.label).join(', ')}을(를) 입력해주세요`);
+      return;
+    }
     setSaving(true);
-    const accounts={};
-    channels.forEach(ch=>{
-      accounts[ch]={connected:enabled[ch],...fields[ch]};
-    });
+    setResult(null);
     try {
-      await onSave({name,color,budget:Number(budget)||0,accounts});
+      // 1. 광고주 계정에 채널 등록
+      const token = getToken();
+      const saveRes = await fetch(`/api/advertisers/${advertiserId}`, {
+        method: "PUT",
+        headers: { "Content-Type":"application/json", "Authorization":`Bearer ${token}` },
+        body: JSON.stringify({
+          accounts: [{ channel, credentials: fields }]
+        })
+      });
+      const saveData = await saveRes.json();
+      if(!saveRes.ok) throw new Error(saveData.error||"저장 실패");
+
+      // 2. 연동 테스트
+      const testRes = await fetch(`/api/advertisers/${advertiserId}/channels/${channel}/test`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "Authorization":`Bearer ${token}` },
+        body: JSON.stringify({ credentials: fields })
+      });
+      const testData = await testRes.json();
+      setResult(testData);
+
+      if(testData.ok){
+        setTimeout(()=>{ onSuccess(); onClose(); }, 1500);
+      }
+    } catch(e) {
+      setResult({ ok:false, message: e.message });
     } finally {
       setSaving(false);
     }
   };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}}
+         onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
+      <div style={{background:"#fff",borderRadius:16,width:480,padding:"28px 26px",position:"relative"}}>
+        <button onClick={onClose} style={{position:"absolute",top:16,right:18,background:"none",border:"none",fontSize:20,color:"#9ca3af",cursor:"pointer"}}>✕</button>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
+          <div style={{width:28,height:28,borderRadius:7,background:cfg.bg,display:"flex",alignItems:"center",justifyContent:"center",color:channel==="kakao"?"#111":"#fff",fontSize:12,fontWeight:700}}>
+            {channel==="daangn"?"당":channel[0].toUpperCase()}
+          </div>
+          <div style={{fontWeight:700,fontSize:16}}>{cfg.label} 연동</div>
+        </div>
+
+        {cfg.inputs.map(({k,label,pw,ph})=>(
+          <div key={k} style={{marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:5}}>{label}</div>
+            <input
+              style={{width:"100%",padding:"10px 12px",border:"1.5px solid #e5e7eb",borderRadius:8,fontSize:13,outline:"none"}}
+              type={pw?"password":"text"} placeholder={ph}
+              value={fields[k]||""}
+              onChange={e=>setFields(f=>({...f,[k]:e.target.value}))}
+              onFocus={e=>e.target.style.borderColor="#2563eb"}
+              onBlur={e=>e.target.style.borderColor="#e5e7eb"}
+            />
+          </div>
+        ))}
+
+        {result&&(
+          <div style={{padding:"10px 14px",borderRadius:8,marginBottom:14,fontSize:13,fontWeight:600,
+            background:result.ok?"#eafaf0":"#fdecec",color:result.ok?"#16a34a":"#e35353"}}>
+            {result.ok?"✓ "+result.message:"✕ "+result.message}
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}>
+          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"transparent",fontSize:13,fontWeight:600,cursor:"pointer",color:"#6b7280"}}>취소</button>
+          <button onClick={handleSave} disabled={saving}
+            style={{padding:"9px 20px",borderRadius:8,border:"none",background:saving?"#93c5fd":"#2563eb",color:"#fff",fontSize:13,fontWeight:700,cursor:saving?"not-allowed":"pointer"}}>
+            {saving?"저장 및 테스트 중...":"저장하고 연동 테스트"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
@@ -485,6 +543,7 @@ function useToast(){
 /* ──────── Accounts Page ──────── */
 function AccountsPage({advertisers,setAdvertisers,onReload,isAdmin}){
   const [modal,setModal]=useState(null);
+  const [channelModal,setChannelModal]=useState(null); // {advertiserId, channel}
   const [saving,setSaving]=useState(false);
   const [testStatus,setTestStatus]=useState({});
   const channels=["meta","naver","google","daangn","tiktok","kakao"];
@@ -699,7 +758,7 @@ function AccountsPage({advertisers,setAdvertisers,onReload,isAdmin}){
                     )}
                     {!connected&&(
                       <button
-                        onClick={()=>setModal(adv)}
+                        onClick={()=>setChannelModal({advertiserId:adv.id, channel:ch})}
                         style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid #2563eb",background:"#eaf1ff",fontSize:11,fontWeight:600,cursor:"pointer",color:"#2563eb",flexShrink:0}}>
                         키 등록
                       </button>
@@ -714,6 +773,14 @@ function AccountsPage({advertisers,setAdvertisers,onReload,isAdmin}){
 
       {modal&&(
         <AdvModal adv={modal==="add"?null:modal} onSave={handleSave} onClose={()=>setModal(null)}/>
+      )}
+      {channelModal&&(
+        <ChannelKeyModal
+          advertiserId={channelModal.advertiserId}
+          channel={channelModal.channel}
+          onClose={()=>setChannelModal(null)}
+          onSuccess={()=>{ showToast(`${CHANNEL_LABELS[channelModal.channel]} 연동 완료!`,"success"); onReload(); }}
+        />
       )}
     </div>
   );

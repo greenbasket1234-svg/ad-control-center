@@ -59,25 +59,33 @@ router.put("/advertisers/:id", requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`UPDATE advertisers SET name=$1,brand_color=$2,monthly_budget=$3,updated_at=NOW() WHERE id=$4`,
-      [name, brand_color, monthly_budget, req.params.id]);
+
+    // name이 있을 때만 기본정보 업데이트
+    if (name) {
+      await client.query(`UPDATE advertisers SET name=$1,brand_color=$2,monthly_budget=$3,updated_at=NOW() WHERE id=$4`,
+        [name, brand_color, monthly_budget||0, req.params.id]);
+    }
+
     for (const acc of accounts) {
       if (!acc.channel) continue;
-      // credentials에서 boolean, null, "***" 제외하고 실제 값이 있는지 확인
       const creds = acc.credentials || {};
-      const realValues = Object.entries(creds).filter(([k,v]) =>
-        v && typeof v === "string" && v !== "***" && k !== "connected" && k !== "status"
+      // 순수 문자열 API 키만 저장
+      const cleanCreds = Object.fromEntries(
+        Object.entries(creds).filter(([k,v]) =>
+          v && typeof v === "string" && v.trim() !== "" && v !== "***"
+        )
       );
-      if (realValues.length > 0) {
-        // boolean 필드(connected 등) 제거하고 순수 자격증명만 저장
-        const cleanCreds = Object.fromEntries(realValues);
+      if (Object.keys(cleanCreds).length > 0) {
         await client.query(
-          `INSERT INTO ad_accounts (advertiser_id,channel,status,credentials_enc) VALUES ($1,$2,'pending',$3)
-           ON CONFLICT (advertiser_id,channel) DO UPDATE SET credentials_enc=$3,status='pending',error_message=NULL`,
+          `INSERT INTO ad_accounts (advertiser_id,channel,status,credentials_enc)
+           VALUES ($1,$2,'pending',$3)
+           ON CONFLICT (advertiser_id,channel) DO UPDATE
+           SET credentials_enc=$3, status='pending', error_message=NULL`,
           [req.params.id, acc.channel, encrypt(cleanCreds)]);
-        console.log(`[저장] advertiser:${req.params.id} channel:${acc.channel} keys:${Object.keys(cleanCreds).join(',')}`);
+        console.log(`[저장 완료] advertiser:${req.params.id} channel:${acc.channel} keys:${Object.keys(cleanCreds).join(',')}`);
       }
     }
+
     await client.query("COMMIT");
     res.json({ ok: true });
   } catch(e) {
