@@ -1,0 +1,28 @@
+{
+  "name": "ad-control-center",
+  "version": "1.0.0",
+  "description": "광고관제소 — 광고주별 채널 API 통합 관리",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "batch": "node src/batch.js yesterday",
+    "batch:last7": "node src/batch.js last7",
+    "batch:last30": "node src/batch.js last30"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "crypto-js": "^4.2.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.0",
+    "node-cron": "^3.0.0",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}
