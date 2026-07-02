@@ -63,17 +63,28 @@ router.put("/advertisers/:id", requireAdmin, async (req, res) => {
       [name, brand_color, monthly_budget, req.params.id]);
     for (const acc of accounts) {
       if (!acc.channel) continue;
-      const hasCreds = acc.credentials && Object.values(acc.credentials).some(v=>v&&v!=="***");
-      if (hasCreds) {
+      // credentials에서 boolean, null, "***" 제외하고 실제 값이 있는지 확인
+      const creds = acc.credentials || {};
+      const realValues = Object.entries(creds).filter(([k,v]) =>
+        v && typeof v === "string" && v !== "***" && k !== "connected" && k !== "status"
+      );
+      if (realValues.length > 0) {
+        // boolean 필드(connected 등) 제거하고 순수 자격증명만 저장
+        const cleanCreds = Object.fromEntries(realValues);
         await client.query(
           `INSERT INTO ad_accounts (advertiser_id,channel,status,credentials_enc) VALUES ($1,$2,'pending',$3)
            ON CONFLICT (advertiser_id,channel) DO UPDATE SET credentials_enc=$3,status='pending',error_message=NULL`,
-          [req.params.id, acc.channel, encrypt(acc.credentials)]);
+          [req.params.id, acc.channel, encrypt(cleanCreds)]);
+        console.log(`[저장] advertiser:${req.params.id} channel:${acc.channel} keys:${Object.keys(cleanCreds).join(',')}`);
       }
     }
     await client.query("COMMIT");
     res.json({ ok: true });
-  } catch(e) { await client.query("ROLLBACK"); res.status(500).json({ error: e.message }); }
+  } catch(e) {
+    await client.query("ROLLBACK");
+    console.error("[PUT advertisers] 오류:", e.message);
+    res.status(500).json({ error: e.message });
+  }
   finally { client.release(); }
 });
 
