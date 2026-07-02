@@ -317,6 +317,7 @@ function AdvModal({adv,onSave,onClose}){
   const [name,setName]=useState(adv?.name||"");
   const [color,setColor]=useState(adv?.color||BRAND_COLORS[0]);
   const [budget,setBudget]=useState(adv?.budget||"");
+  const [saving,setSaving]=useState(false);
   const [enabled,setEnabled]=useState(()=>{
     const init={};
     channels.forEach(ch=>{ init[ch]=adv?.accounts?.[ch]?.connected||false; });
@@ -360,13 +361,18 @@ function AdvModal({adv,onSave,onClose}){
     ]},
   };
 
-  const handleSave=()=>{
+  const handleSave=async()=>{
     if(!name.trim()) return;
+    setSaving(true);
     const accounts={};
     channels.forEach(ch=>{
       accounts[ch]={connected:enabled[ch],...fields[ch]};
     });
-    onSave({name,color,budget:Number(budget)||0,accounts});
+    try {
+      await onSave({name,color,budget:Number(budget)||0,accounts});
+    } finally {
+      setSaving(false);
+    }
   };
 
   return(
@@ -434,8 +440,8 @@ function AdvModal({adv,onSave,onClose}){
 
         <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:24,paddingTop:18,borderTop:"1px solid #f0f2f5"}}>
           <button onClick={onClose} style={{padding:"9px 18px",borderRadius:9,border:"1.5px solid #e5e7eb",background:"transparent",fontSize:13,fontWeight:600,cursor:"pointer",color:"#6b7280"}}>취소</button>
-          <button onClick={handleSave} style={{padding:"9px 20px",borderRadius:9,border:"none",background:"#2563eb",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-            {isEdit?"저장":"저장하고 연동 테스트"}
+          <button onClick={handleSave} disabled={saving} style={{padding:"9px 20px",borderRadius:9,border:"none",background:saving?"#93c5fd":"#2563eb",color:"#fff",fontSize:13,fontWeight:600,cursor:saving?"not-allowed":"pointer"}}>
+            {saving?"저장 중...":(isEdit?"저장":"저장하고 연동 테스트")}
           </button>
         </div>
       </div>
@@ -453,18 +459,47 @@ function AccountsPage({advertisers,setAdvertisers,onReload}){
   const handleSave=async(data)=>{
     setSaving(true);
     try {
-      const accounts = channels
-        .filter(ch=>data.accounts[ch]?.connected)
-        .map(ch=>({ channel:ch, credentials: data.accounts[ch] }));
+      const connectedChannels = channels.filter(ch=>data.accounts[ch]?.connected);
+      const accounts = connectedChannels.map(ch=>({ channel:ch, credentials: data.accounts[ch] }));
+
+      let advertiserId;
       if(modal==="add"){
-        await apiFetch("/advertisers", { method:"POST", body: JSON.stringify({ name:data.name, brand_color:data.color, monthly_budget:data.budget, accounts }) });
+        const created = await apiFetch("/advertisers", {
+          method:"POST",
+          body: JSON.stringify({ name:data.name, brand_color:data.color, monthly_budget:data.budget, accounts })
+        });
+        advertiserId = created.id;
       } else {
-        await apiFetch(`/advertisers/${modal.id}`, { method:"PUT", body: JSON.stringify({ name:data.name, brand_color:data.color, monthly_budget:data.budget, accounts }) });
+        await apiFetch(`/advertisers/${modal.id}`, {
+          method:"PUT",
+          body: JSON.stringify({ name:data.name, brand_color:data.color, monthly_budget:data.budget, accounts })
+        });
+        advertiserId = modal.id;
       }
+
+      // 저장 완료 후 연결된 채널 자동 연동 테스트
+      for(const ch of connectedChannels){
+        const creds = data.accounts[ch];
+        const hasCreds = Object.values(creds).some(v=>v&&v!=="***"&&v!==true&&v!==false);
+        if(hasCreds){
+          try {
+            await apiFetch(`/advertisers/${advertiserId}/channels/${ch}/test`, {
+              method:"POST",
+              body: JSON.stringify({ credentials: creds })
+            });
+          } catch(e) {
+            console.warn(`${ch} 연동 테스트 실패:`, e.message);
+          }
+        }
+      }
+
       await onReload();
       setModal(null);
-    } catch(e) { alert("저장 실패: "+e.message); }
-    finally { setSaving(false); }
+    } catch(e) {
+      alert("저장 실패: "+e.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete=async(id)=>{
