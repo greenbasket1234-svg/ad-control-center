@@ -601,12 +601,16 @@ function AccountsPage({advertisers,setAdvertisers,onReload,isAdmin}){
               </div>
               <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
                 {channels.map(ch=>{
-                  const connected=adv.accounts?.[ch]?.connected;
+                  const acc=adv.accounts?.[ch];
+                  const connected=acc?.connected;
+                  const status=acc?.status||"pending";
                   return(
-                    <span key={ch} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"4px 9px",borderRadius:6,fontSize:11,fontWeight:700,
-                      background:connected?"#eafaf0":"#f3f4f6",color:connected?"#16a34a":"#9ca3af"}}>
-                      <span style={{width:5,height:5,borderRadius:"50%",background:connected?"#16a34a":"#d1d5db"}}/>
-                      {CHANNEL_LABELS[ch]}{connected?" ✓":""}
+                    <span key={ch} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"5px 10px",borderRadius:6,fontSize:11,fontWeight:700,
+                      background:connected?"#eafaf0":status==="error"?"#fdecec":"#f3f4f6",
+                      color:connected?"#16a34a":status==="error"?"#e35353":"#9ca3af"}}>
+                      <span style={{width:6,height:6,borderRadius:"50%",background:connected?"#16a34a":status==="error"?"#e35353":"#d1d5db"}}/>
+                      {CHANNEL_LABELS[ch]}
+                      {connected?" 연결됨":status==="error"?" 오류":""}
                     </span>
                   );
                 })}
@@ -632,6 +636,66 @@ function AccountsPage({advertisers,setAdvertisers,onReload,isAdmin}){
           <div style={{fontSize:12,marginTop:4}}>클릭하여 등록하세요</div>
         </div>
       </div>
+
+      {/* 채널별 연동 상세 현황 */}
+      {advertisers.length>0&&(
+        <div style={{marginTop:28}}>
+          <div style={{fontWeight:700,fontSize:16,marginBottom:14}}>채널별 연동 현황</div>
+          {advertisers.map(adv=>(
+            <div key={adv.id} style={{...card,marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,paddingBottom:14,borderBottom:"1px solid #f0f2f5"}}>
+                <div style={{width:32,height:32,borderRadius:9,background:adv.color,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:14}}>{adv.name[0]}</div>
+                <div style={{fontWeight:700,fontSize:15}}>{adv.name}</div>
+              </div>
+              {channels.map(ch=>{
+                const acc=adv.accounts?.[ch];
+                const connected=acc?.connected;
+                const status=acc?.status||"pending";
+                const key=`${adv.id}_${ch}`;
+                const ts=testStatus[key];
+                return(
+                  <div key={ch} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:"1px solid #f9fafb"}}>
+                    {/* 채널 아이콘 */}
+                    <div style={{width:28,height:28,borderRadius:7,background:COLORS[ch],display:"flex",alignItems:"center",justifyContent:"center",color:ch==="kakao"?"#111":"#fff",fontSize:11,fontWeight:700,flexShrink:0}}>
+                      {ch==="daangn"?"당":ch[0].toUpperCase()}
+                    </div>
+                    {/* 채널명 + 상태 */}
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontWeight:600,fontSize:13}}>{CHANNEL_LABELS[ch]}</span>
+                        <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:999,
+                          background:connected?"#eafaf0":status==="error"?"#fdecec":"#f3f4f6",
+                          color:connected?"#16a34a":status==="error"?"#e35353":"#9ca3af"}}>
+                          {connected?"● 연결됨":status==="error"?"● 오류":"○ 미연동"}
+                        </span>
+                        {ts&&!ts.loading&&(
+                          <span style={{fontSize:11,color:ts.ok?"#16a34a":"#e35353"}}>{ts.message}</span>
+                        )}
+                      </div>
+                    </div>
+                    {/* 연동 테스트 버튼 */}
+                    {connected&&(
+                      <button
+                        onClick={()=>handleTest(adv.id, ch, adv.accounts[ch])}
+                        disabled={ts?.loading}
+                        style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",color:"#6b7280",flexShrink:0}}>
+                        {ts?.loading?"테스트 중...":"연동 테스트"}
+                      </button>
+                    )}
+                    {!connected&&(
+                      <button
+                        onClick={()=>setModal(adv)}
+                        style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid #2563eb",background:"#eaf1ff",fontSize:11,fontWeight:600,cursor:"pointer",color:"#2563eb",flexShrink:0}}>
+                        키 등록
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
 
       {modal&&(
         <AdvModal adv={modal==="add"?null:modal} onSave={handleSave} onClose={()=>setModal(null)}/>
