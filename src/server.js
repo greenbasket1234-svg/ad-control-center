@@ -6,13 +6,14 @@ const cron     = require("node-cron");
 const { initDB } = require("./db");
 const { runBatch } = require("./batch");
 const apiRouter   = require("./api");
+const { router: authRouter } = require("./auth");
 
 const app = express();
 
 app.use(cors({
   origin: [
     process.env.CLIENT_URL,
-    /\.up\.railway\.app$/,  // Railway 도메인 전체 허용
+    /\.up\.railway\.app$/,
     "http://localhost:3000",
     "http://localhost:4000",
   ].filter(Boolean),
@@ -20,16 +21,18 @@ app.use(cors({
 }));
 app.use(express.json());
 
-/* API 라우터 */
+/* 인증 라우터 (로그인 등 — 인증 불필요) */
+app.use("/api/auth", authRouter);
+
+/* API 라우터 (인증 필요) */
 app.use("/api", apiRouter);
 
-/* 프론트 정적 파일 서빙 (public 폴더) */
+/* 프론트 정적 파일 */
 app.use(express.static(path.join(__dirname, "../public")));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "../public", "index.html"));
 });
 
-/* 헬스체크 */
 app.get("/health", (_, res) => res.json({ status: "ok", time: new Date().toISOString() }));
 
 /* 매일 오전 6시 자동 배치 */

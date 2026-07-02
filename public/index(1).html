@@ -36,46 +36,16 @@ const API_BASE = window.location.hostname === "localhost"
   ? "http://localhost:4000/api"
   : "/api";
 
-/* 토큰 관리 */
-const getToken = () => sessionStorage.getItem("acc_token");
-const setToken = (t) => sessionStorage.setItem("acc_token", t);
-const clearToken = () => sessionStorage.removeItem("acc_token");
-const getUser = () => { try { return JSON.parse(sessionStorage.getItem("acc_user")||"null"); } catch{ return null; } };
-const setUser = (u) => sessionStorage.setItem("acc_user", JSON.stringify(u));
-const clearUser = () => sessionStorage.removeItem("acc_user");
-
 async function apiFetch(path, options={}) {
-  const token = getToken();
   const res = await fetch(API_BASE + path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
     ...options,
   });
-  if (res.status === 401) {
-    clearToken(); clearUser();
-    window.location.reload();
-    return;
-  }
   if (!res.ok) {
     const err = await res.json().catch(()=>({ error: res.statusText }));
     throw new Error(err.error || res.statusText);
   }
   return res.json();
-}
-
-async function apiLogin(email, password) {
-  const res = await fetch(API_BASE + "/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "로그인 실패");
-  setToken(data.token);
-  setUser(data.user);
-  return data.user;
 }
 
 /* 날짜 유틸 */
@@ -403,13 +373,15 @@ function AdvModal({adv,onSave,onClose}){
             <div key={ch}>
               {i>0&&<div style={{height:1,background:"#f0f2f5",margin:"16px 0"}}/>}
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:enabled[ch]?12:0}}>
-                <div
-                  onClick={()=>setEnabled(v=>({...v,[ch]:!v[ch]}))}
-                  style={{position:"relative",width:38,height:22,flexShrink:0,cursor:"pointer"}}>
-                  <div style={{position:"absolute",inset:0,background:enabled[ch]?"#2563eb":"#e5e7eb",borderRadius:999,transition:".2s"}}>
-                    <div style={{position:"absolute",width:16,height:16,background:"#fff",borderRadius:"50%",top:3,left:enabled[ch]?19:3,transition:".2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>
+                <label style={{display:"flex",alignItems:"center",cursor:"pointer"}}>
+                  <div style={{position:"relative",width:38,height:22}}>
+                    <input type="checkbox" checked={enabled[ch]} onChange={e=>setEnabled(v=>({...v,[ch]:e.target.checked}))} style={{opacity:0,width:0,height:0,position:"absolute"}}/>
+                    <div style={{position:"absolute",inset:0,background:enabled[ch]?"#2563eb":"#e5e7eb",borderRadius:999,transition:".2s",cursor:"pointer"}}
+                         onClick={()=>setEnabled(v=>({...v,[ch]:!v[ch]}))}>
+                      <div style={{position:"absolute",width:16,height:16,background:"#fff",borderRadius:"50%",top:3,left:enabled[ch]?19:3,transition:".2s"}}/>
+                    </div>
                   </div>
-                </div>
+                </label>
                 <span style={{fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:7}}>
                   <span style={{width:20,height:20,borderRadius:5,background:cfg.bg,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,color:ch==="kakao"?"#111":"#fff",fontWeight:700}}>
                     {ch==="daangn"?"당":ch[0].toUpperCase()}
@@ -572,19 +544,28 @@ function Placeholder({label}){
   );
 }
 
-/* ──────── Login Page ──────── */
-function LoginPage({onLogin}){
-  const [email,setEmail]=useState("");
-  const [pw,setPw]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [error,setError]=useState("");
+/* ──────── App ──────── */
+function App(){
+  const [page,setPage]=useState("dashboard");
+  const [advertisers,setAdvertisers]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(null);
 
-  const handleSubmit=async(e)=>{
-    e.preventDefault();
-    setLoading(true); setError("");
+  /* 광고주 목록 로드 */
+  const loadAdvertisers = async () => {
     try {
-      const user = await apiLogin(email, pw);
-      onLogin(user);
+      const data = await apiFetch("/advertisers");
+      // API 응답 형태를 프론트 형식으로 변환
+      const mapped = data.map(adv => {
+        const accounts = {};
+        const CHANNELS = ["naver","meta","google","daangn","tiktok","kakao"];
+        CHANNELS.forEach(ch => {
+          const acc = (adv.accounts||[]).find(a=>a.channel===ch);
+          accounts[ch] = { connected: acc?.status==="connected", status: acc?.status||"pending", lastSynced: acc?.last_synced_at };
+        });
+        return { id: adv.id, name: adv.name, color: adv.brand_color, budget: Number(adv.monthly_budget||0), accounts, stats:{cost:0,impressions:0,clicks:0,conversions:0,convAmount:0} };
+      });
+      setAdvertisers(mapped);
     } catch(e) {
       setError(e.message);
     } finally {
@@ -592,90 +573,7 @@ function LoginPage({onLogin}){
     }
   };
 
-  return(
-    <div style={{minHeight:"100vh",background:"#f0f2f5",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{background:"#fff",borderRadius:18,padding:"40px 36px",width:400,boxShadow:"0 4px 24px rgba(0,0,0,.08)"}}>
-        {/* 로고 */}
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:32}}>
-          <div style={{width:42,height:42,borderRadius:12,background:"linear-gradient(135deg,#2563eb,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:16}}>AD</div>
-          <div>
-            <div style={{fontSize:18,fontWeight:700}}>광고관제소</div>
-            <div style={{fontSize:12,color:"#9ca3af"}}>Ad Control Center</div>
-          </div>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          <div style={{marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:6}}>이메일</div>
-            <input
-              style={{width:"100%",padding:"11px 14px",border:"1.5px solid #e5e7eb",borderRadius:9,fontSize:14,outline:"none",color:"#1a1d23"}}
-              type="email" placeholder="이메일 입력" value={email}
-              onChange={e=>setEmail(e.target.value)} required autoFocus
-              onFocus={e=>e.target.style.borderColor="#2563eb"}
-              onBlur={e=>e.target.style.borderColor="#e5e7eb"}
-            />
-          </div>
-          <div style={{marginBottom:20}}>
-            <div style={{fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:6}}>비밀번호</div>
-            <input
-              style={{width:"100%",padding:"11px 14px",border:"1.5px solid #e5e7eb",borderRadius:9,fontSize:14,outline:"none",color:"#1a1d23"}}
-              type="password" placeholder="비밀번호 입력" value={pw}
-              onChange={e=>setPw(e.target.value)} required
-              onFocus={e=>e.target.style.borderColor="#2563eb"}
-              onBlur={e=>e.target.style.borderColor="#e5e7eb"}
-            />
-          </div>
-          {error&&<div style={{background:"#fdecec",color:"#e35353",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:14}}>{error}</div>}
-          <button type="submit" disabled={loading}
-            style={{width:"100%",padding:"12px",background:loading?"#93c5fd":"#2563eb",color:"#fff",border:"none",borderRadius:9,fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",transition:".15s"}}>
-            {loading?"로그인 중...":"로그인"}
-          </button>
-        </form>
-
-        <div style={{marginTop:24,padding:"16px",background:"#f9fafb",borderRadius:9,fontSize:12,color:"#6b7280"}}>
-          <div style={{fontWeight:600,marginBottom:4}}>최초 설정이 필요한 경우</div>
-          <div>관리자 계정이 없으면 아래 API로 생성하세요:</div>
-          <code style={{display:"block",marginTop:6,background:"#f0f2f5",padding:"6px 10px",borderRadius:6,fontSize:11,color:"#374151",wordBreak:"break-all"}}>
-            POST /api/auth/setup
-          </code>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-function App(){
-  const [page,setPage]=useState("dashboard");
-  const [advertisers,setAdvertisers]=useState([]);
-  const [loading,setLoading]=useState(true);
-  const [error,setError]=useState(null);
-  const [currentUser,setCurrentUser]=useState(getUser);
-
-  const handleLogin=(user)=>{ setCurrentUser(user); setLoading(true); };
-  const handleLogout=()=>{ clearToken(); clearUser(); setCurrentUser(null); setAdvertisers([]); };
-
-  const loadAdvertisers = async () => {
-    try {
-      const data = await apiFetch("/advertisers");
-      const mapped = (data||[]).map(adv => {
-        const accounts = {};
-        ["naver","meta","google","daangn","tiktok","kakao"].forEach(ch => {
-          const acc = (adv.accounts||[]).find(a=>a.channel===ch);
-          accounts[ch] = { connected: acc?.status==="connected", status: acc?.status||"pending" };
-        });
-        return { id: adv.id, name: adv.name, color: adv.brand_color, budget: Number(adv.monthly_budget||0), accounts, stats:{cost:0,impressions:0,clicks:0,conversions:0,convAmount:0} };
-      });
-      setAdvertisers(mapped);
-    } catch(e) { setError(e.message); }
-    finally { setLoading(false); }
-  };
-
-  useEffect(()=>{ if(currentUser) loadAdvertisers(); else setLoading(false); }, [currentUser]);
-
-  if(!currentUser) return <LoginPage onLogin={handleLogin}/>;
-
-  const isAdmin = currentUser.role==="admin";
+  useEffect(()=>{ loadAdvertisers(); }, []);
 
   const pageContent=()=>{
     if(loading) return(
@@ -694,7 +592,7 @@ function App(){
       </div>
     );
     if(page==="dashboard") return <Dashboard advertisers={advertisers}/>;
-    if(page==="accounts") return <AccountsPage advertisers={advertisers} setAdvertisers={setAdvertisers} onReload={loadAdvertisers} isAdmin={isAdmin}/>;
+    if(page==="accounts") return <AccountsPage advertisers={advertisers} setAdvertisers={setAdvertisers} onReload={loadAdvertisers}/>;
     const found=NAV.find(n=>n.id===page)||NAV_DISABLED.find(n=>n.id===page);
     return <Placeholder label={found?.label||page}/>;
   };
@@ -724,18 +622,6 @@ function App(){
             <span style={{width:16,textAlign:"center",fontSize:13}}>{n.icon}</span>{n.label}
           </div>
         ))}
-        {/* 사용자 정보 + 로그아웃 */}
-        <div style={{marginTop:"auto",paddingTop:12,borderTop:"1px solid #262b35"}}>
-          <div style={{padding:"8px 10px",borderRadius:8,background:"#1e2330"}}>
-            <div style={{fontSize:12,color:"#fff",fontWeight:600,marginBottom:2}}>{currentUser.name||currentUser.email}</div>
-            <div style={{fontSize:10,color:"#6b7280"}}>{isAdmin?"관리자":currentUser.advertiser_name||"광고주"}</div>
-          </div>
-          <div onClick={handleLogout} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 10px",borderRadius:8,fontSize:12,color:"#6b7280",cursor:"pointer",marginTop:4}}
-               onMouseEnter={e=>e.currentTarget.style.color="#e35353"}
-               onMouseLeave={e=>e.currentTarget.style.color="#6b7280"}>
-            ⎋ 로그아웃
-          </div>
-        </div>
       </aside>
 
       {/* Main */}

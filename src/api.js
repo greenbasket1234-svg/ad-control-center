@@ -3,25 +3,35 @@ const { pool }  = require("./db");
 const { encrypt, decrypt } = require("./crypto");
 const channels  = require("./channels");
 const { runBatch } = require("./batch");
+const { requireAuth, requireAdmin } = require("./auth");
 
 const router = express.Router();
 
-/* ── 광고주 목록 ── */
+// 모든 API 라우트에 인증 적용
+router.use(requireAuth);
+
+/* ── 광고주 목록 (관리자: 전체 / 광고주: 본인만) ── */
 router.get("/advertisers", async (req, res) => {
   try {
+    let where = "WHERE adv.is_active=TRUE";
+    const params = [];
+    if (req.user.role !== "admin") {
+      params.push(req.user.advertiser_id);
+      where += ` AND adv.id=$${params.length}`;
+    }
     const { rows } = await pool.query(`
       SELECT adv.*, COALESCE(json_agg(json_build_object(
         'id',ac.id,'channel',ac.channel,'status',ac.status,
         'error_message',ac.error_message,'last_synced_at',ac.last_synced_at,'last_tested_at',ac.last_tested_at
       )) FILTER (WHERE ac.id IS NOT NULL),'[]') AS accounts
       FROM advertisers adv LEFT JOIN ad_accounts ac ON ac.advertiser_id=adv.id
-      WHERE adv.is_active=TRUE GROUP BY adv.id ORDER BY adv.name`);
+      ${where} GROUP BY adv.id ORDER BY adv.name`, params);
     res.json(rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ── 광고주 등록 ── */
-router.post("/advertisers", async (req, res) => {
+/* ── 광고주 등록 (관리자만) ── */
+router.post("/advertisers", requireAdmin, async (req, res) => {
   const { name, brand_color, monthly_budget, accounts=[] } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: "광고주명을 입력하세요" });
   const client = await pool.connect();
@@ -43,8 +53,8 @@ router.post("/advertisers", async (req, res) => {
   finally { client.release(); }
 });
 
-/* ── 광고주 수정 ── */
-router.put("/advertisers/:id", async (req, res) => {
+/* ── 광고주 수정 (관리자만) ── */
+router.put("/advertisers/:id", requireAdmin, async (req, res) => {
   const { name, brand_color, monthly_budget, accounts=[] } = req.body;
   const client = await pool.connect();
   try {
@@ -67,14 +77,17 @@ router.put("/advertisers/:id", async (req, res) => {
   finally { client.release(); }
 });
 
-/* ── 광고주 삭제 ── */
-router.delete("/advertisers/:id", async (req, res) => {
+/* ── 광고주 삭제 (관리자만) ── */
+router.delete("/advertisers/:id", requireAdmin, async (req, res) => {
   await pool.query(`UPDATE advertisers SET is_active=FALSE WHERE id=$1`, [req.params.id]);
   res.json({ ok: true });
 });
 
-/* ── 채널 연동 테스트 ── */
+/* ── 채널 연동 테스트 (본인 광고주만) ── */
 router.post("/advertisers/:id/channels/:channel/test", async (req, res) => {
+  // 광고주 계정은 본인 것만 테스트 가능
+  if (req.user.role !== "admin" && req.user.advertiser_id !== Number(req.params.id))
+    return res.status(403).json({ error: "권한이 없습니다" });
   const { id, channel } = req.params;
   const ch = channels[channel];
   if (!ch) return res.status(400).json({ error: `미지원 채널: ${channel}` });
@@ -101,12 +114,18 @@ router.post("/advertisers/:id/channels/:channel/test", async (req, res) => {
 router.get("/stats/channel-mix", async (req, res) => {
   const { startDate, endDate } = req.query;
   try {
+    let where = "WHERE ds.date BETWEEN $1 AND $2 AND adv.is_active=TRUE";
+    const params = [startDate, endDate];
+    if (req.user.role !== "admin") {
+      params.push(req.user.advertiser_id);
+      where += ` AND ds.advertiser_id=$${params.length}`;
+    }
     const { rows } = await pool.query(`
       SELECT adv.id,adv.name,adv.brand_color,adv.monthly_budget,ds.channel,SUM(ds.cost) AS cost
       FROM daily_stats ds JOIN advertisers adv ON adv.id=ds.advertiser_id
-      WHERE ds.date BETWEEN $1 AND $2 AND adv.is_active=TRUE
+      ${where}
       GROUP BY adv.id,adv.name,adv.brand_color,adv.monthly_budget,ds.channel ORDER BY adv.name,ds.channel`,
-      [startDate, endDate]);
+      params);
     res.json(rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -115,7 +134,13 @@ router.get("/stats/channel-mix", async (req, res) => {
 router.get("/stats/by-channel", async (req, res) => {
   const { startDate, endDate, advertiserId } = req.query;
   try {
-    let q = `
+    let where = "WHERE ds.date BETWEEN $1 AND $2 AND adv.is_active=TRUE";
+    const params = [startDate, endDate];
+    // 광고주 계정은 무조건 본인 것만
+    const filterAdv = req.user.role !== "admin" ? req.user.advertiser_id : advertiserId;
+    if (filterAdv) { params.push(filterAdv); where += ` AND ds.advertiser_id=$${params.length}`; }
+
+    const { rows } = await pool.query(`
       SELECT ds.channel,
         SUM(ds.impressions) AS impressions, SUM(ds.clicks) AS clicks, SUM(ds.cost) AS cost,
         SUM(ds.conversions) AS conversions, SUM(ds.conversion_amount) AS conversion_amount,
@@ -124,11 +149,7 @@ router.get("/stats/by-channel", async (req, res) => {
         ROUND(SUM(ds.cost)::numeric/NULLIF(SUM(ds.impressions),0)*1000,0) AS cpm,
         ROUND(SUM(ds.conversion_amount)::numeric/NULLIF(SUM(ds.cost),0)*100,0) AS roas
       FROM daily_stats ds JOIN advertisers adv ON adv.id=ds.advertiser_id
-      WHERE ds.date BETWEEN $1 AND $2 AND adv.is_active=TRUE`;
-    const p=[startDate,endDate];
-    if (advertiserId) { p.push(advertiserId); q+=` AND ds.advertiser_id=$${p.length}`; }
-    q+=` GROUP BY ds.channel ORDER BY cost DESC`;
-    const { rows } = await pool.query(q, p);
+      ${where} GROUP BY ds.channel ORDER BY cost DESC`, params);
     res.json(rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -138,17 +159,18 @@ router.get("/stats/daily", async (req, res) => {
   const { startDate, endDate, advertiserId, channel } = req.query;
   try {
     let q = `SELECT date,SUM(impressions) AS impressions,SUM(clicks) AS clicks,SUM(cost) AS cost,SUM(conversions) AS conversions,SUM(conversion_amount) AS conversion_amount FROM daily_stats WHERE date BETWEEN $1 AND $2`;
-    const p=[startDate,endDate];
-    if (advertiserId) { p.push(advertiserId); q+=` AND advertiser_id=$${p.length}`; }
-    if (channel)      { p.push(channel);      q+=` AND channel=$${p.length}`; }
-    q+=` GROUP BY date ORDER BY date`;
+    const p = [startDate, endDate];
+    const filterAdv = req.user.role !== "admin" ? req.user.advertiser_id : advertiserId;
+    if (filterAdv) { p.push(filterAdv); q += ` AND advertiser_id=$${p.length}`; }
+    if (channel)   { p.push(channel);   q += ` AND channel=$${p.length}`; }
+    q += ` GROUP BY date ORDER BY date`;
     const { rows } = await pool.query(q, p);
     res.json(rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ── 수동 배치 ── */
-router.post("/batch", async (req, res) => {
+/* ── 수동 배치 (관리자만) ── */
+router.post("/batch", requireAdmin, async (req, res) => {
   const { mode="yesterday" } = req.body||{};
   res.json({ message: `배치 시작 (${mode})` });
   runBatch(mode).catch(console.error);

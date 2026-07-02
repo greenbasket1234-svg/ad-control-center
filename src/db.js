@@ -18,6 +18,18 @@ async function initDB() {
       updated_at     TIMESTAMPTZ DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id            SERIAL PRIMARY KEY,
+      email         TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role          TEXT NOT NULL DEFAULT 'advertiser', -- 'admin' | 'advertiser'
+      advertiser_id INT REFERENCES advertisers(id) ON DELETE SET NULL,
+      name          TEXT,
+      is_active     BOOLEAN DEFAULT TRUE,
+      last_login_at TIMESTAMPTZ,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS ad_accounts (
       id               SERIAL PRIMARY KEY,
       advertiser_id    INT NOT NULL REFERENCES advertisers(id) ON DELETE CASCADE,
