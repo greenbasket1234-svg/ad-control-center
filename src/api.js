@@ -116,45 +116,73 @@ router.delete("/advertisers/:id", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ── 채널 연동 테스트 (본인 광고주만) ── */
+/* ── 채널 연동 테스트 ── */
 router.post("/advertisers/:id/channels/:channel/test", async (req, res) => {
-  // 광고주 계정은 본인 것만 테스트 가능
   if (req.user.role !== "admin" && req.user.advertiser_id !== Number(req.params.id))
     return res.status(403).json({ error: "권한이 없습니다" });
+
   const { id, channel } = req.params;
+  const { credentials, saveResult=true } = req.body || {};
+  // saveResult=false 면 DB status 변경 안 함 (연동 테스트 버튼용)
+
   const ch = channels[channel];
   if (!ch) return res.status(400).json({ error: `미지원 채널: ${channel}` });
+
   try {
-    let creds = req.body?.credentials;
-    if (!creds || !Object.values(creds).some(v=>v&&v!=="***")) {
-      const { rows } = await pool.query(`SELECT credentials_enc FROM ad_accounts WHERE advertiser_id=$1 AND channel=$2`, [id, channel]);
+    let creds = credentials;
+    // 빈 credentials면 DB에서 로드
+    if (!creds || !Object.values(creds).some(v => v && v !== "***")) {
+      const { rows } = await pool.query(
+        `SELECT credentials_enc FROM ad_accounts WHERE advertiser_id=$1 AND channel=$2`, [id, channel]
+      );
       if (!rows[0]) return res.status(404).json({ error: "등록된 계정 없음" });
       creds = decrypt(rows[0].credentials_enc);
     }
-    const result = await ch.testConnection(creds);
-    await pool.query(
-      `INSERT INTO ad_accounts (advertiser_id,channel,status,credentials_enc,last_tested_at) VALUES ($1,$2,$3,$4,NOW())
-       ON CONFLICT (advertiser_id,channel) DO UPDATE SET status=$3,error_message=CASE WHEN $3='connected' THEN NULL ELSE ad_accounts.error_message END,last_tested_at=NOW()`,
-      [id, channel, result.ok?"connected":"error", encrypt(creds)]);
 
-    // 로그 기록
-    const { rows: advRows } = await pool.query(`SELECT name FROM advertisers WHERE id=$1`, [id]);
-    const advName = advRows[0]?.name || id;
-    if (result.ok) {
-      await logger.connect(`${advName} / ${channel} 연동 성공`, {
-        channel, advertiserId: Number(id), advertiserName: advName,
-        detail: result.message, status: "success"
-      });
-    } else {
-      await logger.error(`${advName} / ${channel} 연동 실패`, {
-        channel, advertiserId: Number(id), advertiserName: advName,
-        detail: result.message, status: "error"
-      });
+    const result = await ch.testConnection(creds);
+
+    if (saveResult) {
+      // 키 등록 시에만 DB status 업데이트
+      await pool.query(
+        `INSERT INTO ad_accounts (advertiser_id,channel,status,credentials_enc,last_tested_at)
+         VALUES ($1,$2,$3,$4,NOW())
+         ON CONFLICT (advertiser_id,channel) DO UPDATE
+         SET status=$3, credentials_enc=$4, last_tested_at=NOW(),
+             error_message=CASE WHEN $3='connected' THEN NULL ELSE error_message END`,
+        [id, channel, result.ok ? "connected" : "error", encrypt(creds)]
+      );
+
+      const { rows: advRows } = await pool.query(`SELECT name FROM advertisers WHERE id=$1`, [id]);
+      const advName = advRows[0]?.name || id;
+      if (result.ok) {
+        await logger.connect(`${advName} / ${channel} 연동 성공`, {
+          channel, advertiserId: Number(id), advertiserName: advName,
+          detail: result.message, status: "success"
+        });
+      } else {
+        await logger.error(`${advName} / ${channel} 연동 실패`, {
+          channel, advertiserId: Number(id), advertiserName: advName,
+          detail: result.message, status: "error"
+        });
+      }
+    }
+
+    // last_tested_at만 업데이트 (readonly 모드에서도)
+    if (!saveResult) {
+      await pool.query(
+        `UPDATE ad_accounts SET last_tested_at=NOW() WHERE advertiser_id=$1 AND channel=$2`,
+        [id, channel]
+      ).catch(() => {});
     }
 
     res.json(result);
   } catch(e) {
-    await pool.query(`UPDATE ad_accounts SET status='error',error_message=$1,last_tested_at=NOW() WHERE advertiser_id=$2 AND channel=$3`, [e.message,id,channel]).catch(()=>{});
+    if (saveResult) {
+      await pool.query(
+        `UPDATE ad_accounts SET last_tested_at=NOW() WHERE advertiser_id=$1 AND channel=$2`,
+        [e.message, id, channel]
+      ).catch(() => {});
+    }
     res.status(400).json({ ok: false, message: e.message });
   }
 });

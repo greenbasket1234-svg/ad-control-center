@@ -548,11 +548,14 @@ function AccountsPage({advertisers,onReload,isAdmin}){
     await onReload();
   };
 
-  const handleTest=async(advertiserId,channel,accounts)=>{
+  const handleTest=async(advertiserId,channel)=>{
     try{
-      const r=await api(`/advertisers/${advertiserId}/channels/${channel}/test`,{method:"POST",body:JSON.stringify({credentials:{}})});
-      toast(r.ok?`${CH_LABEL[channel]} 연동 확인됨`:`${CH_LABEL[channel]}: ${r.message}`,r.ok?"success":"error");
-      await onReload();
+      // saveResult:false → DB status 변경 없이 결과만 확인
+      const r=await api(`/advertisers/${advertiserId}/channels/${channel}/test`,{
+        method:"POST",
+        body:JSON.stringify({credentials:{},saveResult:false})
+      });
+      toast(r.ok?`${CH_LABEL[channel]} 연동 확인 완료 ✓`:`${CH_LABEL[channel]} 테스트 실패: ${r.message}`,r.ok?"success":"error");
     }catch(e){toast(e.message,"error");}
   };
 
