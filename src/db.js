@@ -8,6 +8,21 @@ const pool = new Pool({
 
 async function initDB() {
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS activity_logs (
+      id            SERIAL PRIMARY KEY,
+      type          TEXT NOT NULL, -- 'batch', 'connect', 'error', 'info'
+      channel       TEXT,
+      advertiser_id INT REFERENCES advertisers(id) ON DELETE SET NULL,
+      advertiser_name TEXT,
+      message       TEXT NOT NULL,
+      detail        TEXT,
+      status        TEXT DEFAULT 'info', -- 'success', 'error', 'warning', 'info'
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_logs_created ON activity_logs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_logs_type    ON activity_logs(type);
+
     CREATE TABLE IF NOT EXISTS advertisers (
       id             SERIAL PRIMARY KEY,
       name           TEXT NOT NULL,

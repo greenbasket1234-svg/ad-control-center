@@ -4,11 +4,25 @@ const { encrypt, decrypt } = require("./crypto");
 const channels  = require("./channels");
 const { runBatch } = require("./batch");
 const { requireAuth, requireAdmin } = require("./auth");
+const logger    = require("./logger");
 
 const router = express.Router();
-
-// 모든 API 라우트에 인증 적용
 router.use(requireAuth);
+
+/* ── 알림 / 로그 ── */
+router.get("/logs", async (req, res) => {
+  const { limit=50, type, status } = req.query;
+  try {
+    let q = `SELECT * FROM activity_logs WHERE 1=1`;
+    const p = [];
+    if (type)   { p.push(type);   q += ` AND type=$${p.length}`; }
+    if (status) { p.push(status); q += ` AND status=$${p.length}`; }
+    p.push(Number(limit));
+    q += ` ORDER BY created_at DESC LIMIT $${p.length}`;
+    const { rows } = await pool.query(q, p);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 /* ── 광고주 목록 (관리자: 전체 / 광고주: 본인만) ── */
 router.get("/advertisers", async (req, res) => {
@@ -122,6 +136,22 @@ router.post("/advertisers/:id/channels/:channel/test", async (req, res) => {
       `INSERT INTO ad_accounts (advertiser_id,channel,status,credentials_enc,last_tested_at) VALUES ($1,$2,$3,$4,NOW())
        ON CONFLICT (advertiser_id,channel) DO UPDATE SET status=$3,error_message=CASE WHEN $3='connected' THEN NULL ELSE ad_accounts.error_message END,last_tested_at=NOW()`,
       [id, channel, result.ok?"connected":"error", encrypt(creds)]);
+
+    // 로그 기록
+    const { rows: advRows } = await pool.query(`SELECT name FROM advertisers WHERE id=$1`, [id]);
+    const advName = advRows[0]?.name || id;
+    if (result.ok) {
+      await logger.connect(`${advName} / ${channel} 연동 성공`, {
+        channel, advertiserId: Number(id), advertiserName: advName,
+        detail: result.message, status: "success"
+      });
+    } else {
+      await logger.error(`${advName} / ${channel} 연동 실패`, {
+        channel, advertiserId: Number(id), advertiserName: advName,
+        detail: result.message, status: "error"
+      });
+    }
+
     res.json(result);
   } catch(e) {
     await pool.query(`UPDATE ad_accounts SET status='error',error_message=$1,last_tested_at=NOW() WHERE advertiser_id=$2 AND channel=$3`, [e.message,id,channel]).catch(()=>{});

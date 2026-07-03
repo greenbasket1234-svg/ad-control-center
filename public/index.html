@@ -774,6 +774,134 @@ function AccountsPage({advertisers,setAdvertisers,onReload,isAdmin}){
   );
 }
 
+/* ──────── Logs Page ──────── */
+function LogsPage(){
+  const [logs,setLogs]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [filter,setFilter]=useState("all");
+
+  const loadLogs=async()=>{
+    setLoading(true);
+    try {
+      const data=await apiFetch("/logs?limit=100");
+      setLogs(data||[]);
+    } catch(e){ console.error(e); }
+    finally{ setLoading(false); }
+  };
+
+  useEffect(()=>{ loadLogs(); },[]);
+
+  const statusConfig={
+    success:{color:"#16a34a",bg:"#eafaf0",label:"성공"},
+    error:  {color:"#e35353",bg:"#fdecec",label:"오류"},
+    warning:{color:"#f59e0b",bg:"#fff8ec",label:"경고"},
+    info:   {color:"#2563eb",bg:"#eaf1ff",label:"정보"},
+  };
+
+  const typeConfig={
+    batch:  {icon:"⚙",label:"배치"},
+    connect:{icon:"🔗",label:"연동"},
+    error:  {icon:"❌",label:"오류"},
+    info:   {icon:"ℹ",label:"정보"},
+    warning:{icon:"⚠",label:"경고"},
+  };
+
+  const CHANNEL_COLORS={meta:"#2563eb",naver:"#16a34a",google:"#ea4335",daangn:"#ff6f0f",tiktok:"#111827",kakao:"#ca8a04"};
+  const CHANNEL_NAMES={meta:"Meta",naver:"네이버",google:"구글",daangn:"당근",tiktok:"틱톡",kakao:"카카오"};
+
+  const filtered=filter==="all"?logs:logs.filter(l=>l.status===filter||l.type===filter);
+
+  const formatTime=(ts)=>{
+    const d=new Date(ts);
+    return d.toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
+  };
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:20}}>알림 / 로그</div>
+          <div style={{fontSize:13,color:"#9ca3af",marginTop:4}}>배치 실행, 채널 연동, 오류 내역을 확인하세요</div>
+        </div>
+        <button onClick={loadLogs} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",color:"#6b7280"}}>
+          🔄 새로고침
+        </button>
+      </div>
+
+      {/* 필터 탭 */}
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+        {[["all","전체"],["success","성공"],["error","오류"],["warning","경고"],["batch","배치"],["connect","연동"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setFilter(v)}
+            style={{padding:"6px 14px",borderRadius:20,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",
+              background:filter===v?"#2563eb":"#f3f4f6",color:filter===v?"#fff":"#6b7280"}}>
+            {l} {filter===v&&`(${filtered.length})`}
+          </button>
+        ))}
+      </div>
+
+      {loading?(
+        <div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>불러오는 중...</div>
+      ):filtered.length===0?(
+        <div style={{...card,textAlign:"center",padding:40,color:"#9ca3af"}}>
+          <div style={{fontSize:32,marginBottom:12}}>📋</div>
+          <div>로그가 없습니다</div>
+        </div>
+      ):(
+        <div style={{...card,padding:0,overflow:"hidden"}}>
+          {filtered.map((log,i)=>{
+            const sc=statusConfig[log.status]||statusConfig.info;
+            const tc=typeConfig[log.type]||typeConfig.info;
+            return(
+              <div key={log.id} style={{
+                display:"flex",alignItems:"flex-start",gap:14,
+                padding:"14px 20px",
+                borderBottom:i<filtered.length-1?"1px solid #f9fafb":"none",
+                background:i%2===0?"#fff":"#fafafa"
+              }}>
+                {/* 타입 아이콘 */}
+                <div style={{fontSize:18,flexShrink:0,marginTop:2}}>{tc.icon}</div>
+
+                {/* 내용 */}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                    {/* 상태 배지 */}
+                    <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:999,
+                      background:sc.bg,color:sc.color}}>
+                      {sc.label}
+                    </span>
+                    {/* 채널 배지 */}
+                    {log.channel&&(
+                      <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:999,
+                        background:CHANNEL_COLORS[log.channel]||"#6b7280",color:"#fff"}}>
+                        {CHANNEL_NAMES[log.channel]||log.channel}
+                      </span>
+                    )}
+                    {/* 광고주 */}
+                    {log.advertiser_name&&(
+                      <span style={{fontSize:11,color:"#9ca3af"}}>{log.advertiser_name}</span>
+                    )}
+                  </div>
+                  <div style={{fontSize:13,fontWeight:600,color:"#1a1d23",marginBottom:log.detail?4:0}}>
+                    {log.message}
+                  </div>
+                  {log.detail&&log.detail!==log.message&&(
+                    <div style={{fontSize:11,color:"#9ca3af",wordBreak:"break-all"}}>{log.detail}</div>
+                  )}
+                </div>
+
+                {/* 시간 */}
+                <div style={{fontSize:11,color:"#9ca3af",flexShrink:0,marginTop:2}}>
+                  {formatTime(log.created_at)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ──────── Placeholder ──────── */
 function Placeholder({label}){
   return(
@@ -908,6 +1036,7 @@ function App(){
     );
     if(page==="dashboard") return <Dashboard advertisers={advertisers}/>;
     if(page==="accounts") return <AccountsPage advertisers={advertisers} setAdvertisers={setAdvertisers} onReload={loadAdvertisers} isAdmin={isAdmin}/>;
+    if(page==="alerts") return <LogsPage/>;
     const found=NAV.find(n=>n.id===page)||NAV_DISABLED.find(n=>n.id===page);
     return <Placeholder label={found?.label||page}/>;
   };
