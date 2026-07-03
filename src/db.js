@@ -4,25 +4,18 @@ const { Pool } = require("pg");
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
+pool.on("error", (err) => {
+  console.error("[DB] 예기치 않은 클라이언트 오류:", err.message);
 });
 
 async function initDB() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS activity_logs (
-      id            SERIAL PRIMARY KEY,
-      type          TEXT NOT NULL, -- 'batch', 'connect', 'error', 'info'
-      channel       TEXT,
-      advertiser_id INT REFERENCES advertisers(id) ON DELETE SET NULL,
-      advertiser_name TEXT,
-      message       TEXT NOT NULL,
-      detail        TEXT,
-      status        TEXT DEFAULT 'info', -- 'success', 'error', 'warning', 'info'
-      created_at    TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_logs_created ON activity_logs(created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_logs_type    ON activity_logs(type);
-
+    -- 광고주 마스터
     CREATE TABLE IF NOT EXISTS advertisers (
       id             SERIAL PRIMARY KEY,
       name           TEXT NOT NULL,
@@ -33,11 +26,12 @@ async function initDB() {
       updated_at     TIMESTAMPTZ DEFAULT NOW()
     );
 
+    -- 사용자 (로그인 계정)
     CREATE TABLE IF NOT EXISTS users (
       id            SERIAL PRIMARY KEY,
       email         TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
-      role          TEXT NOT NULL DEFAULT 'advertiser', -- 'admin' | 'advertiser'
+      role          TEXT NOT NULL DEFAULT 'advertiser',
       advertiser_id INT REFERENCES advertisers(id) ON DELETE SET NULL,
       name          TEXT,
       is_active     BOOLEAN DEFAULT TRUE,
@@ -45,6 +39,7 @@ async function initDB() {
       created_at    TIMESTAMPTZ DEFAULT NOW()
     );
 
+    -- 채널 광고 계정 (API 키)
     CREATE TABLE IF NOT EXISTS ad_accounts (
       id               SERIAL PRIMARY KEY,
       advertiser_id    INT NOT NULL REFERENCES advertisers(id) ON DELETE CASCADE,
@@ -58,6 +53,7 @@ async function initDB() {
       UNIQUE (advertiser_id, channel)
     );
 
+    -- 일별 성과 통계
     CREATE TABLE IF NOT EXISTS daily_stats (
       id                SERIAL PRIMARY KEY,
       advertiser_id     INT NOT NULL REFERENCES advertisers(id) ON DELETE CASCADE,
@@ -76,9 +72,25 @@ async function initDB() {
       UNIQUE (advertiser_id, channel, date)
     );
 
+    -- 활동 로그 (advertisers 테이블 이후에 생성)
+    CREATE TABLE IF NOT EXISTS activity_logs (
+      id              SERIAL PRIMARY KEY,
+      type            TEXT NOT NULL DEFAULT 'info',
+      channel         TEXT,
+      advertiser_id   INT,
+      advertiser_name TEXT,
+      message         TEXT NOT NULL,
+      detail          TEXT,
+      status          TEXT DEFAULT 'info',
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    -- 인덱스
     CREATE INDEX IF NOT EXISTS idx_stats_date       ON daily_stats(date DESC);
     CREATE INDEX IF NOT EXISTS idx_stats_advertiser ON daily_stats(advertiser_id);
     CREATE INDEX IF NOT EXISTS idx_stats_channel    ON daily_stats(channel);
+    CREATE INDEX IF NOT EXISTS idx_logs_created     ON activity_logs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_logs_status      ON activity_logs(status);
   `);
   console.log("[DB] 테이블 초기화 완료");
 }

@@ -9,98 +9,41 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:"Apple SD Gothic Neo","Malgun Gothic",-apple-system,BlinkMacSystemFont,sans-serif;background:#f0f2f5;color:#1a1d23;font-size:14px;height:100vh;overflow:hidden;}
-::-webkit-scrollbar{width:6px;}
-::-webkit-scrollbar-track{background:transparent;}
-::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px;}
-input,select,textarea{font-family:inherit;}
+body{font-family:"Apple SD Gothic Neo","Malgun Gothic",-apple-system,sans-serif;background:#f0f2f5;color:#1a1d23;font-size:14px;height:100vh;overflow:hidden;}
+::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px;}
+input,select,button{font-family:inherit;}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useRef,useEffect}=React;
+const {useState,useEffect,useCallback,useRef}=React;
 
-const COLORS={
-  meta:"#2563eb",naver:"#16a34a",google:"#ea4335",
-  daangn:"#ff6f0f",tiktok:"#111827",kakao:"#ca8a04"
-};
-const CHANNEL_LABELS={
-  meta:"Meta",naver:"네이버",google:"구글",
-  daangn:"당근",tiktok:"틱톡",kakao:"카카오"
+/* ─── 상수 ─── */
+const API_BASE = window.location.hostname==="localhost" ? "http://localhost:4000/api" : "/api";
+
+const CHANNELS = ["meta","naver","google","daangn","tiktok","kakao"];
+const CH_LABEL = {meta:"Meta",naver:"네이버",google:"구글",daangn:"당근",tiktok:"틱톡",kakao:"카카오"};
+const CH_COLOR = {meta:"#2563eb",naver:"#16a34a",google:"#ea4335",daangn:"#ff6f0f",tiktok:"#111827",kakao:"#ca8a04"};
+const CH_INPUTS = {
+  naver:[{k:"apiKey",label:"API Key",pw:true,ph:"Access License Key"},{k:"secretKey",label:"Secret Key",pw:true,ph:"Secret Key"},{k:"customerId",label:"Customer ID",ph:"광고주 ID"}],
+  meta:[{k:"accountId",label:"Ad Account ID",ph:"act_XXXXXXXXXX"},{k:"accessToken",label:"Access Token",pw:true,ph:"장기 액세스 토큰"}],
+  google:[{k:"customerId",label:"Customer ID",ph:"XXX-XXX-XXXX"},{k:"developerToken",label:"Developer Token",pw:true},{k:"refreshToken",label:"Refresh Token",pw:true}],
+  daangn:[{k:"apiKey",label:"API Key",pw:true},{k:"accountId",label:"Account ID"}],
+  tiktok:[{k:"accessToken",label:"Access Token",pw:true},{k:"advertiserId",label:"Advertiser ID"}],
+  kakao:[{k:"apiKey",label:"REST API Key",pw:true},{k:"accountId",label:"Ad Account ID"},{k:"accessToken",label:"Access Token",pw:true}],
 };
 const BRAND_COLORS=["#f59e0b","#2563eb","#16a34a","#e35353","#7c3aed","#0891b2","#db2777","#374151"];
-
-/* ── API 설정 ── */
-const API_BASE = window.location.hostname === "localhost"
-  ? "http://localhost:4000/api"
-  : "/api";
-
-/* 토큰 관리 */
-const getToken = () => sessionStorage.getItem("acc_token");
-const setToken = (t) => sessionStorage.setItem("acc_token", t);
-const clearToken = () => sessionStorage.removeItem("acc_token");
-const getUser = () => { try { return JSON.parse(sessionStorage.getItem("acc_user")||"null"); } catch{ return null; } };
-const setUser = (u) => sessionStorage.setItem("acc_user", JSON.stringify(u));
-const clearUser = () => sessionStorage.removeItem("acc_user");
-
-async function apiFetch(path, options={}) {
-  const token = getToken();
-  const res = await fetch(API_BASE + path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...options,
-  });
-  if (res.status === 401) {
-    clearToken(); clearUser();
-    window.location.reload();
-    return;
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(()=>({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
-  }
-  return res.json();
-}
-
-async function apiLogin(email, password) {
-  const res = await fetch(API_BASE + "/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "로그인 실패");
-  setToken(data.token);
-  setUser(data.user);
-  return data.user;
-}
-
-/* 날짜 유틸 */
-function getDateRange(days=7) {
-  const end = new Date(); end.setDate(end.getDate()-1);
-  const start = new Date(end); start.setDate(end.getDate()-(days-1));
-  return {
-    startDate: start.toISOString().slice(0,10),
-    endDate:   end.toISOString().slice(0,10),
-  };
-}
-
-const fmt=(n)=>n>=10000?`${(n/10000).toFixed(1)}만`:n.toLocaleString();
-const fmtW=(n)=>`₩${n.toLocaleString()}`;
-const pct=(a,b)=>b?((a/b)*100).toFixed(1)+"%" : "-";
-
-/* ──────── Nav ──────── */
 const NAV=[
   {id:"dashboard",icon:"▦",label:"전체 대시보드"},
   {id:"report",icon:"▤",label:"리포트"},
   {id:"naver-kw",icon:"●",label:"네이버 키워드 리포트"},
   {id:"meta-report",icon:"◆",label:"Meta 소재 리포트"},
-  {id:"kw-analysis",icon:"🔍",label:"키워드 분석"},
+  {id:"keyword",icon:"🔍",label:"키워드 분석"},
   {id:"fatigue",icon:"🔥",label:"소재 피로도"},
-  {id:"re-register",icon:"↻",label:"소재 재등록 센터"},
+  {id:"reregist",icon:"↻",label:"소재 재등록 센터"},
   {id:"library",icon:"▣",label:"소재 라이브러리"},
   {id:"automation",icon:"⚙",label:"자동화 룰"},
   {id:"accounts",icon:"🔗",label:"광고계정 / 연동"},
@@ -114,365 +57,416 @@ const NAV_DISABLED=[
   {id:"weather",icon:"☁",label:"날씨 / 시즌 캘린더"},
 ];
 
-/* ──────── Dashboard ──────── */
-function Dashboard({advertisers}){
-  const [period,setPeriod]=useState("30");
-  const [channelStats,setChannelStats]=useState({});
-  const [channelMix,setChannelMix]=useState([]);
-  const [loading,setLoading]=useState(true);
-  const channels=["meta","naver","google","daangn","tiktok","kakao"];
+/* ─── 공통 스타일 ─── */
+const card={background:"#fff",borderRadius:14,padding:"20px 22px",border:"1px solid #e9eaec"};
+const lbl={fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:5,display:"block"};
+const inp={padding:"9px 12px",border:"1.5px solid #e5e7eb",borderRadius:8,fontSize:13,width:"100%",outline:"none",color:"#1a1d23",transition:"border-color .15s"};
+const btn=(bg="#2563eb",color="#fff")=>({padding:"9px 18px",borderRadius:9,border:"none",background:bg,color,fontSize:13,fontWeight:700,cursor:"pointer"});
 
-  function getDateRange(p){
-    const end=new Date(); end.setDate(end.getDate()-1);
-    const start=new Date(end);
-    const days={"7":7,"14":14,"30":30,"60":60,"90":90,"오늘":0,"어제":1}[p]||30;
-    if(p==="오늘"){ const t=new Date(); return{startDate:t.toISOString().slice(0,10),endDate:t.toISOString().slice(0,10)}; }
-    start.setDate(end.getDate()-(days-1));
-    return{startDate:start.toISOString().slice(0,10),endDate:end.toISOString().slice(0,10)};
-  }
+/* ─── 인증 관련 ─── */
+const getToken=()=>sessionStorage.getItem("acc_token");
+const setToken=t=>sessionStorage.setItem("acc_token",t);
+const getUser=()=>{try{return JSON.parse(sessionStorage.getItem("acc_user")||"null");}catch{return null;}};
+const setUser=u=>sessionStorage.setItem("acc_user",JSON.stringify(u));
+const clearAuth=()=>{sessionStorage.removeItem("acc_token");sessionStorage.removeItem("acc_user");};
 
-  const loadStats=async()=>{
-    setLoading(true);
-    const {startDate,endDate}=getDateRange(period);
-    try{
-      const [byChannel,mix]=await Promise.all([
-        apiFetch(`/stats/by-channel?startDate=${startDate}&endDate=${endDate}`),
-        apiFetch(`/stats/channel-mix?startDate=${startDate}&endDate=${endDate}`)
-      ]);
-      const statsMap={};
-      (byChannel||[]).forEach(r=>{ statsMap[r.channel]={
-        cost:Number(r.cost||0), impressions:Number(r.impressions||0),
-        clicks:Number(r.clicks||0), conversions:Number(r.conversions||0),
-        convAmount:Number(r.conversion_amount||0),
-        ctr:Number(r.ctr||0), cpc:Number(r.cpc||0), cpm:Number(r.cpm||0), roas:Number(r.roas||0)
-      };});
-      setChannelStats(statsMap);
-      setChannelMix(mix||[]);
-    }catch(e){ console.error(e); }
-    finally{ setLoading(false); }
+/* ─── API 호출 ─── */
+async function api(path,options={}){
+  const token=getToken();
+  const res=await fetch(API_BASE+path,{
+    headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},
+    ...options,
+  });
+  if(res.status===401){clearAuth();window.location.reload();return;}
+  const data=await res.json();
+  if(!res.ok) throw new Error(data.error||res.statusText);
+  return data;
+}
+async function apiLogin(email,password){
+  const res=await fetch(API_BASE+"/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});
+  const data=await res.json();
+  if(!res.ok) throw new Error(data.error||"로그인 실패");
+  setToken(data.token);setUser(data.user);
+  return data.user;
+}
+
+/* ─── Toast ─── */
+function useToast(){
+  const [toasts,setToasts]=useState([]);
+  const show=useCallback((msg,type="success")=>{
+    const id=Date.now();
+    setToasts(p=>[...p,{id,msg,type}]);
+    setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),3500);
+  },[]);
+  return{toasts,toast:show};
+}
+function Toasts({toasts}){
+  return(
+    <div style={{position:"fixed",bottom:24,right:24,zIndex:999,display:"flex",flexDirection:"column",gap:8}}>
+      {toasts.map(t=>(
+        <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",borderRadius:10,
+          background:t.type==="success"?"#16a34a":t.type==="error"?"#e35353":"#2563eb",
+          color:"#fff",fontSize:13,fontWeight:600,minWidth:220,animation:"fadeIn .2s ease",
+          boxShadow:"0 4px 20px rgba(0,0,0,.15)"}}>
+          <span>{t.type==="success"?"✓":t.type==="error"?"✕":"ℹ"}</span>
+          <span>{t.msg}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ─── 로딩 스피너 ─── */
+function Spinner({size=32}){
+  return <div style={{width:size,height:size,border:"3px solid #e5e7eb",borderTop:"3px solid #2563eb",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>;
+}
+
+/* ─── 로그인 페이지 ─── */
+function LoginPage({onLogin}){
+  const [email,setEmail]=useState("");
+  const [pw,setPw]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState("");
+
+  const submit=async e=>{
+    e.preventDefault();setLoading(true);setError("");
+    try{const user=await apiLogin(email,pw);onLogin(user);}
+    catch(e){setError(e.message);}
+    finally{setLoading(false);}
   };
 
-  useEffect(()=>{ loadStats(); },[period]);
-
-  const totalCost=Object.values(channelStats).reduce((s,v)=>s+(v.cost||0),0);
-  const totalImpr=Object.values(channelStats).reduce((s,v)=>s+(v.impressions||0),0);
-  const totalClk=Object.values(channelStats).reduce((s,v)=>s+(v.clicks||0),0);
-  const totalConv=Object.values(channelStats).reduce((s,v)=>s+(v.conversions||0),0);
-  const totalAmt=Object.values(channelStats).reduce((s,v)=>s+(v.convAmount||0),0);
-
-  // 광고주별 채널 합산
-  const advCostMap={};
-  channelMix.forEach(r=>{
-    if(!advCostMap[r.id]) advCostMap[r.id]={name:r.name,color:r.brand_color,budget:Number(r.monthly_budget||0),total:0,channels:{}};
-    advCostMap[r.id].total+=Number(r.cost||0);
-    advCostMap[r.id].channels[r.channel]=Number(r.cost||0);
-  });
-
   return(
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      {/* Channel Mix */}
-      <div style={card}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
-          <div>
-            <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>채널별 광고비 믹스</div>
-            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-              {channels.map(ch=>(
-                <span key={ch} style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:12,color:"#6b7280"}}>
-                  <span style={{width:8,height:8,borderRadius:2,background:COLORS[ch],display:"inline-block"}}/>
-                  {CHANNEL_LABELS[ch]}
-                </span>
-              ))}
-            </div>
+    <div style={{minHeight:"100vh",background:"#f0f2f5",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{background:"#fff",borderRadius:18,padding:"40px 36px",width:400,boxShadow:"0 4px 24px rgba(0,0,0,.08)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:32}}>
+          <div style={{width:42,height:42,borderRadius:12,background:"linear-gradient(135deg,#2563eb,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:16}}>AD</div>
+          <div><div style={{fontSize:18,fontWeight:700}}>광고관제소</div><div style={{fontSize:12,color:"#9ca3af"}}>Ad Control Center</div></div>
+        </div>
+        <form onSubmit={submit}>
+          <div style={{marginBottom:14}}>
+            <label style={lbl}>이메일</label>
+            <input style={inp} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="이메일 입력" required autoFocus
+              onFocus={e=>e.target.style.borderColor="#2563eb"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
           </div>
-          <span style={{fontSize:11,color:"#9ca3af"}}>최근 {period}일 기준</span>
-        </div>
-        {loading?(
-          <div style={{color:"#9ca3af",fontSize:13,padding:"10px 0"}}>데이터 불러오는 중...</div>
-        ):Object.keys(advCostMap).length===0?(
-          <div style={{color:"#9ca3af",fontSize:13,padding:"10px 0"}}>수집된 데이터가 없습니다. 배치를 실행해주세요.</div>
-        ):(
-          Object.values(advCostMap).map(adv=>{
-            const pct=totalCost>0?(adv.total/totalCost*100):0;
-            return(
-              <div key={adv.name} style={{marginBottom:16}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                  <span style={{fontWeight:700,fontSize:13}}>{adv.name}</span>
-                  <span style={{fontSize:12,color:"#6b7280"}}>
-                    <b style={{color:"#1a1d23"}}>{fmtW(adv.total)}</b>
-                    {Object.entries(adv.channels).map(([ch,cost])=>(
-                      <span key={ch}> · {CHANNEL_LABELS[ch]} {fmtW(cost)}</span>
-                    ))}
-                  </span>
-                </div>
-                <div style={{height:9,borderRadius:5,background:"#f0f2f5",overflow:"hidden",display:"flex"}}>
-                  {Object.entries(adv.channels).map(([ch,cost])=>(
-                    <div key={ch} style={{width:`${adv.total>0?cost/adv.total*100:0}%`,background:COLORS[ch]}}/>
-                  ))}
-                </div>
-              </div>
-            );
-          })
-        )}
-        <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>전체 합계 {fmtW(totalCost)} · 연결된 채널 데이터를 자동 합산합니다</div>
-      </div>
-
-      {/* Stats Table */}
-      <div style={card}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
-          <div style={{fontWeight:700,fontSize:15}}>광고 성과 지표</div>
-          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-            {[["매체별","ch"],["계정별","acc"],["기간별","period"]].map(([l,v])=>(
-              <button key={v} onClick={()=>setPeriod(v)} style={{...tabBtn,background:period===v?"#2563eb":"transparent",color:period===v?"#fff":"#9ca3af",border:"none"}}>{l}</button>
-            ))}
-            <div style={{width:1,background:"#e5e7eb",margin:"0 4px"}}/>
-            {["오늘","어제","7","14","30","60","90"].map(p=>(
-              <button key={p} onClick={()=>setPeriod(p)} style={{...tabBtn,background:period===p?"#2563eb":"transparent",color:period===p?"#fff":"#9ca3af",border:"none"}}>{p==="오늘"||p==="어제"?p:`${p}일`}</button>
-            ))}
+          <div style={{marginBottom:20}}>
+            <label style={lbl}>비밀번호</label>
+            <input style={inp} type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="비밀번호 입력" required
+              onFocus={e=>e.target.style.borderColor="#2563eb"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
           </div>
-        </div>
-        <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:780}}>
-            <thead>
-              <tr>{["매체","총소진","노출","CPM","클릭","CTR","CPC","전환","전환율","전환매출","CPA","ROAS"].map(h=>(
-                <th key={h} style={{textAlign:h==="매체"?"left":"right",padding:"8px 10px",borderBottom:"1px solid #f0f2f5",fontWeight:500,color:"#9ca3af",fontSize:12,whiteSpace:"nowrap"}}>{h}</th>
-              ))}</tr>
-            </thead>
-            <tbody>
-              {channels.map(ch=>{
-                if(ch==="tiktok") return(
-                  <tr key={ch}>
-                    <td style={{padding:"12px 10px",fontWeight:600}}>
-                      틱톡 <span style={{fontSize:10,background:"#f3f4f6",color:"#9ca3af",padding:"2px 7px",borderRadius:999,fontWeight:700,marginLeft:4}}>연동 대기</span>
-                    </td>
-                    {Array(11).fill(0).map((_,i)=><td key={i} style={{textAlign:"right",padding:"12px 10px",color:"#d1d5db"}}>-</td>)}
-                  </tr>
-                );
-                const s=channelStats[ch]||{cost:0,impressions:0,clicks:0,conversions:0,convAmount:0};
-                const cpm=s.impressions?(s.cost/s.impressions*1000).toFixed(0):"-";
-                const ctr=s.impressions?(s.clicks/s.impressions*100).toFixed(2)+"%":"-";
-                const cpc=s.clicks?(s.cost/s.clicks).toFixed(0):"-";
-                const cvr=s.clicks?(s.conversions/s.clicks*100).toFixed(2)+"%":"-";
-                const cpa=s.conversions?(s.cost/s.conversions).toFixed(0):"-";
-                const roas=s.cost?(s.convAmount/s.cost*100).toFixed(0):"-";
-                const hasData=s.cost>0||s.impressions>0;
-                return(
-                  <tr key={ch} style={{borderBottom:"1px solid #f9fafb",opacity:hasData?1:0.4}}>
-                    <td style={{padding:"12px 10px",fontWeight:600}}>{CHANNEL_LABELS[ch]}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{hasData?fmtW(s.cost):"-"}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{hasData?s.impressions.toLocaleString():"-"}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{cpm==="-"?"-":`₩${Number(cpm).toLocaleString()}`}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{hasData?s.clicks.toLocaleString():"-"}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{ctr}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{cpc==="-"?"-":`₩${Number(cpc).toLocaleString()}`}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{hasData?s.conversions:"-"}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{cvr}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{s.convAmount?fmtW(s.convAmount):"-"}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px"}}>{cpa==="-"?"-":`₩${Number(cpa).toLocaleString()}`}</td>
-                    <td style={{textAlign:"right",padding:"12px 10px",color:roas!=="-"&&Number(roas)>100?"#16a34a":roas!=="-"&&Number(roas)<100?"#e35353":"inherit"}}>{roas==="-"?"-":`${roas}%`}</td>
-                  </tr>
-                );
-              })}
-              <tr style={{background:"#fafafa",fontWeight:700}}>
-                <td style={{padding:"12px 10px"}}>전체 합산<div style={{fontSize:11,fontWeight:400,color:"#9ca3af",marginTop:2}}>모든 매체</div></td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{fmtW(totalCost)}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalImpr.toLocaleString()}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalImpr?`₩${Math.round(totalCost/totalImpr*1000).toLocaleString()}`:"-"}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalClk.toLocaleString()}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalImpr?(totalClk/totalImpr*100).toFixed(2)+"%":"-"}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalClk?`₩${Math.round(totalCost/totalClk).toLocaleString()}`:"-"}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalConv}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalClk?(totalConv/totalClk*100).toFixed(2)+"%":"-"}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalAmt?fmtW(totalAmt):"-"}</td>
-                <td style={{textAlign:"right",padding:"12px 10px"}}>{totalConv?`₩${Math.round(totalCost/totalConv).toLocaleString()}`:"-"}</td>
-                <td style={{textAlign:"right",padding:"12px 10px",color:"#16a34a"}}>{totalCost?Math.round(totalAmt/totalCost*100)+"%":"-"}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div style={{fontSize:11,color:"#9ca3af",marginTop:12}}>CPM=노출단가, CPC=클릭단가, CTR=클릭/노출, CPA=전환당비용, ROAS=매출/광고비</div>
-      </div>
-
-      {/* Bottom row */}
-      <div style={{display:"flex",gap:16}}>
-        {/* Budget */}
-        <div style={{...card,flex:1}}>
-          <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>브랜드별 예산 소진율</div>
-          {Object.values(advCostMap).length===0?(
-            <div style={{fontSize:13,color:"#9ca3af"}}>수집된 데이터가 없습니다</div>
-          ):Object.values(advCostMap).map(adv=>{
-            const budget=advertisers.find(a=>a.name===adv.name)?.budget||0;
-            const p=budget>0?(adv.total/budget*100):0;
-            return(
-              <div key={adv.name} style={{marginBottom:16}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                  <span style={{display:"flex",alignItems:"center",gap:7,fontWeight:600,fontSize:13}}>
-                    <span style={{width:8,height:8,borderRadius:2,background:adv.color,display:"inline-block"}}/>
-                    {adv.name}
-                  </span>
-                  <span style={{fontSize:12,color:"#6b7280"}}>
-                    {fmtW(adv.total)} / {budget?fmtW(budget):"-"}
-                    {budget>0&&<span style={{marginLeft:8,background:"#eafaf0",color:"#16a34a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:5}}>{p.toFixed(1)}%</span>}
-                  </span>
-                </div>
-                <div style={{height:8,borderRadius:5,background:"#f0f2f5",overflow:"hidden"}}>
-                  <div style={{width:`${Math.min(p,100)}%`,height:"100%",background:adv.color,borderRadius:5}}/>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {/* Recommendation */}
-        <div style={{...card,flex:1}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div style={{fontWeight:700,fontSize:15}}>추천 조치</div>
-            <span style={{background:"#eafaf0",color:"#16a34a",fontWeight:700,fontSize:11,padding:"3px 9px",borderRadius:999}}>0건</span>
-          </div>
-          <div style={{fontSize:13,color:"#9ca3af",paddingTop:6}}>현재 추천할 조치가 없습니다 — 모든 캠페인이 안정 범위 안에서 운영 중입니다.</div>
-        </div>
-      </div>
-
-      {/* Risk + Best */}
-      <div style={{display:"flex",gap:16}}>
-        <div style={{...card,flex:1}}>
-          <div style={{fontWeight:700,fontSize:15,marginBottom:10}}>🔥 위험 광고 (소재 피로도)</div>
-          <div style={{fontSize:13,color:"#9ca3af"}}>위험 소재 없음</div>
-        </div>
-        <div style={{...card,flex:1}}>
-          <div style={{fontWeight:700,fontSize:15,marginBottom:10}}>⭐ 우수 광고</div>
-          {[
-            {name:"20260609_인스타3_설연휴",brand:"웹컴투바베큐",ctr:"1.48%",cpm:"₩6,300",fatigue:0},
-            {name:"20260609_인스타1_야장",brand:"웹컴투바베큐",ctr:"1.89%",cpm:"₩5,498",fatigue:10},
-            {name:"20260609_인스타2_퇴근캠핑",brand:"웹컴투바베큐",ctr:"1.44%",cpm:"₩5,194",fatigue:10},
-          ].map((a,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 0",borderBottom:i<2?"1px solid #f0f2f5":"none"}}>
-              <div>
-                <div style={{fontWeight:600,fontSize:13,marginBottom:3}}>{a.name}</div>
-                <div style={{fontSize:11,color:"#9ca3af"}}>{a.brand} · CTR {a.ctr} · CPM {a.cpm}</div>
-              </div>
-              <span style={{fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:999,background:a.fatigue===0?"#eafaf0":"#fdecec",color:a.fatigue===0?"#16a34a":"#e35353"}}>피로 {a.fatigue}</span>
-            </div>
-          ))}
+          {error&&<div style={{background:"#fdecec",color:"#e35353",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:14}}>{error}</div>}
+          <button type="submit" disabled={loading} style={{...btn(),width:"100%",padding:"12px",opacity:loading?.7:1}}>
+            {loading?"로그인 중...":"로그인"}
+          </button>
+        </form>
+        <div style={{marginTop:20,padding:"14px",background:"#f9fafb",borderRadius:8,fontSize:12,color:"#6b7280"}}>
+          최초 관리자 계정: <code style={{fontSize:11}}>POST /api/auth/setup</code>
         </div>
       </div>
     </div>
   );
 }
 
-/* ──────── Channel Key Modal (채널별 개별 등록) ──────── */
-function ChannelKeyModal({advertiserId, channel, onClose, onSuccess}){
-  const chConfig={
-    naver:{label:"네이버 검색광고",bg:"#16a34a",inputs:[
-      {k:"apiKey",label:"API Key (Access License)",pw:true,ph:"발급받은 API Key"},
-      {k:"secretKey",label:"Secret Key",pw:true,ph:"Secret Key"},
-      {k:"customerId",label:"Customer ID",pw:false,ph:"광고주 고유 ID"},
-    ]},
-    meta:{label:"Meta (Facebook/Instagram)",bg:"#2563eb",inputs:[
-      {k:"accountId",label:"Ad Account ID",pw:false,ph:"act_XXXXXXXXXX"},
-      {k:"accessToken",label:"Access Token",pw:true,ph:"장기 액세스 토큰"},
-    ]},
-    google:{label:"구글 광고",bg:"#ea4335",inputs:[
-      {k:"customerId",label:"Customer ID",pw:false,ph:"XXX-XXX-XXXX"},
-      {k:"developerToken",label:"Developer Token",pw:true,ph:"Developer Token"},
-      {k:"refreshToken",label:"Refresh Token (OAuth)",pw:true,ph:"OAuth Refresh Token"},
-    ]},
-    daangn:{label:"당근 광고",bg:"#ff6f0f",inputs:[
-      {k:"apiKey",label:"API Key",pw:true,ph:"당근 광고 API Key"},
-      {k:"accountId",label:"Account ID",pw:false,ph:"광고 계정 ID"},
-    ]},
-    tiktok:{label:"틱톡 광고",bg:"#111827",inputs:[
-      {k:"accessToken",label:"Access Token",pw:true,ph:"TikTok Ads Access Token"},
-      {k:"advertiserId",label:"Advertiser ID",pw:false,ph:"광고주 ID"},
-    ]},
-    kakao:{label:"카카오 광고",bg:"#ca8a04",inputs:[
-      {k:"apiKey",label:"REST API Key",pw:true,ph:"카카오 REST API Key"},
-      {k:"accountId",label:"Ad Account ID",pw:false,ph:"광고 계정 ID"},
-      {k:"accessToken",label:"Access Token",pw:true,ph:"OAuth Access Token"},
-    ]},
+/* ─── 사이드바 ─── */
+function Sidebar({page,setPage,user,onLogout}){
+  return(
+    <aside style={{width:228,background:"#15181f",flexShrink:0,display:"flex",flexDirection:"column",padding:"16px 10px",overflowY:"auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"4px 8px 16px"}}>
+        <div style={{width:32,height:32,borderRadius:9,background:"linear-gradient(135deg,#2563eb,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:13,flexShrink:0}}>AD</div>
+        <div><div style={{fontSize:14,fontWeight:700,color:"#fff",lineHeight:1.2}}>광고관제소</div><div style={{fontSize:10,color:"#6b7280"}}>Ad Control Center</div></div>
+      </div>
+      {NAV.map(n=>(
+        <div key={n.id} onClick={()=>setPage(n.id)}
+          style={{display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:8,fontSize:13,cursor:"pointer",marginBottom:1,
+            background:page===n.id?"#262b35":"transparent",color:page===n.id?"#fff":"#8b939f",fontWeight:page===n.id?600:400,transition:".12s"}}>
+          <span style={{width:16,textAlign:"center"}}>{n.icon}</span>{n.label}
+        </div>
+      ))}
+      <div style={{height:1,background:"#262b35",margin:"12px 4px"}}/>
+      <div style={{fontSize:10,color:"#4b505c",padding:"4px 10px 6px"}}>준비중</div>
+      {NAV_DISABLED.map(n=>(
+        <div key={n.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:8,fontSize:13,color:"#4b505c",marginBottom:1}}>
+          <span style={{width:16,textAlign:"center"}}>{n.icon}</span>{n.label}
+        </div>
+      ))}
+      <div style={{marginTop:"auto",paddingTop:12,borderTop:"1px solid #262b35"}}>
+        <div style={{padding:"8px 10px",borderRadius:8,background:"#1e2330",marginBottom:4}}>
+          <div style={{fontSize:12,color:"#fff",fontWeight:600}}>{user.name||user.email}</div>
+          <div style={{fontSize:10,color:"#6b7280"}}>{user.role==="admin"?"관리자":"광고주"}</div>
+        </div>
+        <div onClick={onLogout} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:8,fontSize:12,color:"#6b7280",cursor:"pointer"}}
+          onMouseEnter={e=>e.currentTarget.style.color="#e35353"}
+          onMouseLeave={e=>e.currentTarget.style.color="#6b7280"}>
+          ⎋ 로그아웃
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/* ─── 대시보드 ─── */
+function Dashboard({advertisers}){
+  const [period,setPeriod]=useState("30");
+  const [stats,setStats]=useState({byChannel:{},mix:[]});
+  const [loading,setLoading]=useState(true);
+
+  const getPeriodDates=p=>{
+    const end=new Date();end.setDate(end.getDate()-1);
+    const start=new Date(end);
+    if(p==="오늘"){const t=new Date();return{s:t.toISOString().slice(0,10),e:t.toISOString().slice(0,10)};}
+    if(p==="어제"){return{s:end.toISOString().slice(0,10),e:end.toISOString().slice(0,10)};}
+    start.setDate(end.getDate()-(Number(p)-1));
+    return{s:start.toISOString().slice(0,10),e:end.toISOString().slice(0,10)};
   };
 
-  const cfg = chConfig[channel];
-  const [fields, setFields] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState(null);
+  const load=async()=>{
+    setLoading(true);
+    const{s,e}=getPeriodDates(period);
+    try{
+      const[byChannel,mix]=await Promise.all([
+        api(`/stats/by-channel?startDate=${s}&endDate=${e}`),
+        api(`/stats/channel-mix?startDate=${s}&endDate=${e}`)
+      ]);
+      const map={};
+      (byChannel||[]).forEach(r=>{map[r.channel]={
+        cost:+r.cost||0,impressions:+r.impressions||0,clicks:+r.clicks||0,
+        conversions:+r.conversions||0,convAmount:+r.conversion_amount||0,
+        ctr:+r.ctr||0,cpc:+r.cpc||0,cpm:+r.cpm||0,roas:+r.roas||0
+      };});
+      setStats({byChannel:map,mix:mix||[]});
+    }catch(e){console.error(e);}
+    finally{setLoading(false);}
+  };
 
-  const handleSave = async() => {
-    // 빈 값 체크
-    const missing = cfg.inputs.filter(({k})=>!fields[k]?.trim());
-    if(missing.length>0){
-      alert(`${missing.map(m=>m.label).join(', ')}을(를) 입력해주세요`);
-      return;
-    }
-    setSaving(true);
-    setResult(null);
-    try {
-      // 1. 광고주 계정에 채널 등록
-      const token = getToken();
-      const saveRes = await fetch(`/api/advertisers/${advertiserId}`, {
-        method: "PUT",
-        headers: { "Content-Type":"application/json", "Authorization":`Bearer ${token}` },
-        body: JSON.stringify({
-          accounts: [{ channel, credentials: fields }]
-        })
-      });
-      const saveData = await saveRes.json();
-      if(!saveRes.ok) throw new Error(saveData.error||"저장 실패");
+  useEffect(()=>{load();},[period]);
 
+  const fmtW=n=>`₩${Math.round(n).toLocaleString()}`;
+  const total=Object.values(stats.byChannel).reduce((a,v)=>({
+    cost:a.cost+v.cost,impressions:a.impressions+v.impressions,
+    clicks:a.clicks+v.clicks,conversions:a.conversions+v.conversions,convAmount:a.convAmount+v.convAmount
+  }),{cost:0,impressions:0,clicks:0,conversions:0,convAmount:0});
+
+  // 광고주별 채널 믹스 집계
+  const advMap={};
+  stats.mix.forEach(r=>{
+    if(!advMap[r.id])advMap[r.id]={name:r.name,color:r.brand_color,budget:+r.monthly_budget||0,total:0,channels:{}};
+    advMap[r.id].total+=+r.cost||0;
+    advMap[r.id].channels[r.channel]=+r.cost||0;
+  });
+  const advList=Object.values(advMap);
+
+  const PERIODS=[["오늘","오늘"],["어제","어제"],["7","7일"],["14","14일"],["30","30일"],["60","60일"],["90","90일"]];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* 채널 믹스 */}
+      <div style={card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,flexWrap:"wrap",gap:10}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>채널별 광고비 믹스</div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              {CHANNELS.map(ch=>(
+                <span key={ch} style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:12,color:"#6b7280"}}>
+                  <span style={{width:8,height:8,borderRadius:2,background:CH_COLOR[ch],display:"inline-block"}}/>
+                  {CH_LABEL[ch]}
+                </span>
+              ))}
+            </div>
+          </div>
+          <span style={{fontSize:11,color:"#9ca3af"}}>최근 {period}일 기준</span>
+        </div>
+        {loading?<div style={{color:"#9ca3af",fontSize:13}}>불러오는 중...</div>
+        :advList.length===0?<div style={{color:"#9ca3af",fontSize:13}}>수집된 데이터가 없습니다. 배치를 실행해주세요.</div>
+        :advList.map(adv=>(
+          <div key={adv.name} style={{marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+              <span style={{fontWeight:700,fontSize:13}}>{adv.name}</span>
+              <span style={{fontSize:12,color:"#6b7280"}}>
+                <b style={{color:"#1a1d23"}}>{fmtW(adv.total)}</b>
+                {Object.entries(adv.channels).map(([ch,c])=><span key={ch}> · {CH_LABEL[ch]} {fmtW(c)}</span>)}
+              </span>
+            </div>
+            <div style={{height:9,borderRadius:5,background:"#f0f2f5",overflow:"hidden",display:"flex"}}>
+              {Object.entries(adv.channels).map(([ch,c])=>(
+                <div key={ch} style={{width:`${adv.total>0?c/adv.total*100:0}%`,background:CH_COLOR[ch]}}/>
+              ))}
+            </div>
+          </div>
+        ))}
+        <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>전체 합계 {fmtW(total.cost)}</div>
+      </div>
+
+      {/* 성과 지표 테이블 */}
+      <div style={card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
+          <div style={{fontWeight:700,fontSize:15}}>광고 성과 지표</div>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+            {PERIODS.map(([v,l])=>(
+              <button key={v} onClick={()=>setPeriod(v)}
+                style={{padding:"6px 11px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",border:"none",
+                  background:period===v?"#2563eb":"transparent",color:period===v?"#fff":"#9ca3af"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:800}}>
+            <thead>
+              <tr>{["매체","총소진","노출","CPM","클릭","CTR","CPC","전환","전환율","전환매출","CPA","ROAS"].map(h=>(
+                <th key={h} style={{textAlign:h==="매체"?"left":"right",padding:"8px 10px",borderBottom:"1px solid #f0f2f5",fontWeight:500,color:"#9ca3af",fontSize:12,whiteSpace:"nowrap"}}>{h}</th>
+              ))}</tr>
+            </thead>
+            <tbody>
+              {CHANNELS.map(ch=>{
+                if(ch==="tiktok")return(
+                  <tr key={ch}><td style={{padding:"12px 10px",fontWeight:600}}>
+                    틱톡 <span style={{fontSize:10,background:"#f3f4f6",color:"#9ca3af",padding:"2px 7px",borderRadius:999,marginLeft:4}}>연동 대기</span>
+                  </td>{Array(11).fill(0).map((_,i)=><td key={i} style={{textAlign:"right",padding:"12px 10px",color:"#d1d5db"}}>-</td>)}</tr>
+                );
+                const s=stats.byChannel[ch];
+                if(!s||s.cost===0)return(
+                  <tr key={ch} style={{opacity:.4}}>
+                    <td style={{padding:"12px 10px",fontWeight:600}}>{CH_LABEL[ch]}</td>
+                    {Array(11).fill(0).map((_,i)=><td key={i} style={{textAlign:"right",padding:"12px 10px",color:"#d1d5db"}}>-</td>)}
+                  </tr>
+                );
+                const cpm=s.impressions?(s.cost/s.impressions*1000).toFixed(0):"-";
+                const ctr=s.impressions?(s.clicks/s.impressions*100).toFixed(2)+"%":"-";
+                const cpc=s.clicks?(s.cost/s.clicks).toFixed(0):"-";
+                const cvr=s.clicks?(s.conversions/s.clicks*100).toFixed(2)+"%":"-";
+                const cpa=s.conversions?(s.cost/s.conversions).toFixed(0):"-";
+                const roas=s.cost?(s.convAmount/s.cost*100).toFixed(0):"-";
+                return(
+                  <tr key={ch} style={{borderBottom:"1px solid #f9fafb"}}>
+                    <td style={{padding:"12px 10px",fontWeight:600}}>{CH_LABEL[ch]}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{fmtW(s.cost)}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{s.impressions.toLocaleString()}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{cpm==="-"?"-":`₩${(+cpm).toLocaleString()}`}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{s.clicks.toLocaleString()}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{ctr}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{cpc==="-"?"-":`₩${(+cpc).toLocaleString()}`}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{s.conversions}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{cvr}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{s.convAmount?fmtW(s.convAmount):"-"}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px"}}>{cpa==="-"?"-":`₩${(+cpa).toLocaleString()}`}</td>
+                    <td style={{textAlign:"right",padding:"12px 10px",fontWeight:600,
+                      color:roas!=="-"?(+roas>=100?"#16a34a":"#e35353"):"inherit"}}>
+                      {roas==="-"?"-":`${roas}%`}
+                    </td>
+                  </tr>
+                );
+              })}
+              {/* 합산 */}
+              <tr style={{background:"#fafafa",fontWeight:700,borderTop:"2px solid #e9eaec"}}>
+                <td style={{padding:"12px 10px"}}>전체 합산<div style={{fontSize:11,fontWeight:400,color:"#9ca3af",marginTop:2}}>모든 매체</div></td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{fmtW(total.cost)}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{total.impressions.toLocaleString()}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{total.impressions?`₩${Math.round(total.cost/total.impressions*1000).toLocaleString()}`:"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{total.clicks.toLocaleString()}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{total.impressions?(total.clicks/total.impressions*100).toFixed(2)+"%":"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{total.clicks?`₩${Math.round(total.cost/total.clicks).toLocaleString()}`:"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{total.conversions}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{total.clicks?(total.conversions/total.clicks*100).toFixed(2)+"%":"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{total.convAmount?fmtW(total.convAmount):"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px"}}>{total.conversions?`₩${Math.round(total.cost/total.conversions).toLocaleString()}`:"-"}</td>
+                <td style={{textAlign:"right",padding:"12px 10px",color:"#16a34a"}}>{total.cost?Math.round(total.convAmount/total.cost*100)+"%":"-"}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style={{fontSize:11,color:"#9ca3af",marginTop:10}}>CPM=노출단가, CPC=클릭단가, CTR=클릭/노출, CPA=전환당비용, ROAS=매출/광고비</div>
+      </div>
+
+      {/* 하단 2열 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        {/* 예산 소진율 */}
+        <div style={card}>
+          <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>브랜드별 예산 소진율</div>
+          {advList.length===0?<div style={{fontSize:13,color:"#9ca3af"}}>수집된 데이터가 없습니다</div>
+          :advList.map(adv=>{
+            const p=adv.budget>0?Math.min(adv.total/adv.budget*100,100):0;
+            return(
+              <div key={adv.name} style={{marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:6,fontSize:13}}>
+                  <span style={{display:"flex",alignItems:"center",gap:7,fontWeight:600}}>
+                    <span style={{width:8,height:8,borderRadius:2,background:adv.color}}/>
+                    {adv.name}
+                  </span>
+                  <span style={{color:"#6b7280"}}>
+                    {fmtW(adv.total)} / {adv.budget?fmtW(adv.budget):"-"}
+                    {adv.budget>0&&<span style={{marginLeft:8,background:"#eafaf0",color:"#16a34a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:5}}>{p.toFixed(1)}%</span>}
+                  </span>
+                </div>
+                <div style={{height:8,borderRadius:5,background:"#f0f2f5",overflow:"hidden"}}>
+                  <div style={{width:`${p}%`,height:"100%",background:adv.color,borderRadius:5}}/>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {/* 추천 조치 */}
+        <div style={card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontWeight:700,fontSize:15}}>추천 조치</div>
+            <span style={{background:"#eafaf0",color:"#16a34a",fontWeight:700,fontSize:11,padding:"3px 9px",borderRadius:999}}>0건</span>
+          </div>
+          <div style={{fontSize:13,color:"#9ca3af"}}>현재 추천할 조치가 없습니다.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── 채널 키 등록 모달 ─── */
+function ChannelKeyModal({advertiserId,channel,onClose,onSuccess}){
+  const inputs=CH_INPUTS[channel]||[];
+  const [fields,setFields]=useState({});
+  const [saving,setSaving]=useState(false);
+  const [result,setResult]=useState(null);
+
+  const save=async()=>{
+    const missing=inputs.filter(({k})=>!fields[k]?.trim());
+    if(missing.length){alert(`${missing.map(m=>m.label).join(", ")}을(를) 입력해주세요`);return;}
+    setSaving(true);setResult(null);
+    try{
+      // 1. 저장
+      await api(`/advertisers/${advertiserId}`,{method:"PUT",body:JSON.stringify({accounts:[{channel,credentials:fields}]})});
       // 2. 연동 테스트
-      const testRes = await fetch(`/api/advertisers/${advertiserId}/channels/${channel}/test`, {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "Authorization":`Bearer ${token}` },
-        body: JSON.stringify({ credentials: fields })
-      });
-      const testData = await testRes.json();
-      setResult(testData);
-
-      if(testData.ok){
-        setTimeout(()=>{ onSuccess(); onClose(); }, 1500);
-      }
-    } catch(e) {
-      setResult({ ok:false, message: e.message });
-    } finally {
-      setSaving(false);
-    }
+      const r=await api(`/advertisers/${advertiserId}/channels/${channel}/test`,{method:"POST",body:JSON.stringify({credentials:fields})});
+      setResult(r);
+      if(r.ok){setTimeout(()=>{onSuccess(r.message);onClose();},1500);}
+    }catch(e){setResult({ok:false,message:e.message});}
+    finally{setSaving(false);}
   };
 
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}}
-         onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
-      <div style={{background:"#fff",borderRadius:16,width:480,padding:"28px 26px",position:"relative"}}>
-        <button onClick={onClose} style={{position:"absolute",top:16,right:18,background:"none",border:"none",fontSize:20,color:"#9ca3af",cursor:"pointer"}}>✕</button>
+      onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{background:"#fff",borderRadius:16,width:460,padding:"28px 26px",position:"relative"}}>
+        <button onClick={onClose} style={{position:"absolute",top:14,right:16,background:"none",border:"none",fontSize:20,color:"#9ca3af",cursor:"pointer"}}>✕</button>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
-          <div style={{width:28,height:28,borderRadius:7,background:cfg.bg,display:"flex",alignItems:"center",justifyContent:"center",color:channel==="kakao"?"#111":"#fff",fontSize:12,fontWeight:700}}>
+          <div style={{width:28,height:28,borderRadius:7,background:CH_COLOR[channel],display:"flex",alignItems:"center",justifyContent:"center",color:channel==="kakao"?"#111":"#fff",fontSize:11,fontWeight:700}}>
             {channel==="daangn"?"당":channel[0].toUpperCase()}
           </div>
-          <div style={{fontWeight:700,fontSize:16}}>{cfg.label} 연동</div>
+          <div style={{fontWeight:700,fontSize:16}}>{CH_LABEL[channel]} 연동</div>
         </div>
-
-        {cfg.inputs.map(({k,label,pw,ph})=>(
+        {inputs.map(({k,label,pw,ph})=>(
           <div key={k} style={{marginBottom:12}}>
-            <div style={{fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:5}}>{label}</div>
-            <input
-              style={{width:"100%",padding:"10px 12px",border:"1.5px solid #e5e7eb",borderRadius:8,fontSize:13,outline:"none"}}
-              type={pw?"password":"text"} placeholder={ph}
-              value={fields[k]||""}
-              onChange={e=>setFields(f=>({...f,[k]:e.target.value}))}
-              onFocus={e=>e.target.style.borderColor="#2563eb"}
-              onBlur={e=>e.target.style.borderColor="#e5e7eb"}
-            />
+            <label style={lbl}>{label}</label>
+            <input style={inp} type={pw?"password":"text"} placeholder={ph||label}
+              value={fields[k]||""} onChange={e=>setFields(f=>({...f,[k]:e.target.value}))}
+              onFocus={e=>e.target.style.borderColor="#2563eb"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
           </div>
         ))}
-
         {result&&(
-          <div style={{padding:"10px 14px",borderRadius:8,marginBottom:14,fontSize:13,fontWeight:600,
+          <div style={{padding:"10px 14px",borderRadius:8,marginBottom:12,fontSize:13,fontWeight:600,
             background:result.ok?"#eafaf0":"#fdecec",color:result.ok?"#16a34a":"#e35353"}}>
             {result.ok?"✓ "+result.message:"✕ "+result.message}
           </div>
         )}
-
         <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}>
-          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"transparent",fontSize:13,fontWeight:600,cursor:"pointer",color:"#6b7280"}}>취소</button>
-          <button onClick={handleSave} disabled={saving}
-            style={{padding:"9px 20px",borderRadius:8,border:"none",background:saving?"#93c5fd":"#2563eb",color:"#fff",fontSize:13,fontWeight:700,cursor:saving?"not-allowed":"pointer"}}>
+          <button onClick={onClose} style={{...btn("#f3f4f6","#6b7280")}}>취소</button>
+          <button onClick={save} disabled={saving} style={{...btn(),opacity:saving?.7:1}}>
             {saving?"저장 및 테스트 중...":"저장하고 연동 테스트"}
           </button>
         </div>
@@ -481,7 +475,7 @@ function ChannelKeyModal({advertiserId, channel, onClose, onSuccess}){
   );
 }
 
-/* ──────── Advertiser Modal (광고주 기본정보 추가/편집) ──────── */
+/* ─── 광고주 추가/편집 모달 ─── */
 function AdvModal({adv,onSave,onClose}){
   const isEdit=!!adv;
   const [name,setName]=useState(adv?.name||"");
@@ -489,410 +483,263 @@ function AdvModal({adv,onSave,onClose}){
   const [budget,setBudget]=useState(adv?.budget||"");
   const [saving,setSaving]=useState(false);
 
-  const handleSave=async()=>{
-    if(!name.trim()){ alert("광고주명을 입력하세요"); return; }
+  const save=async()=>{
+    if(!name.trim()){alert("광고주명을 입력하세요");return;}
     setSaving(true);
-    try {
-      await onSave({name,color,budget:Number(budget)||0});
-    } finally {
-      setSaving(false);
-    }
+    try{await onSave({name,color,budget:Number(budget)||0});}
+    finally{setSaving(false);}
   };
 
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}
-         onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style={{background:"#fff",borderRadius:16,width:440,padding:"28px 26px",position:"relative"}}>
-        <button onClick={onClose} style={{position:"absolute",top:16,right:18,background:"none",border:"none",fontSize:20,color:"#9ca3af",cursor:"pointer"}}>✕</button>
-        <div style={{fontWeight:700,fontSize:17,marginBottom:18}}>{isEdit?"광고주 편집":"광고주 추가"}</div>
-
+      onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{background:"#fff",borderRadius:16,width:420,padding:"28px 26px",position:"relative"}}>
+        <button onClick={onClose} style={{position:"absolute",top:14,right:16,background:"none",border:"none",fontSize:20,color:"#9ca3af",cursor:"pointer"}}>✕</button>
+        <div style={{fontWeight:700,fontSize:17,marginBottom:20}}>{isEdit?"광고주 편집":"광고주 추가"}</div>
         <div style={{marginBottom:12}}>
-          <div style={lbl}>광고주명 *</div>
-          <input style={inp} value={name} onChange={e=>setName(e.target.value)} placeholder="예) 웹컴투바베큐"
+          <label style={lbl}>광고주명 *</label>
+          <input style={inp} value={name} onChange={e=>setName(e.target.value)} placeholder="예) 다방"
             onFocus={e=>e.target.style.borderColor="#2563eb"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
         </div>
         <div style={{marginBottom:12}}>
-          <div style={lbl}>월 예산 (원)</div>
-          <input style={inp} value={budget} onChange={e=>setBudget(e.target.value)} placeholder="예) 3000000"
+          <label style={lbl}>월 예산 (원)</label>
+          <input style={inp} value={budget} onChange={e=>setBudget(e.target.value.replace(/\D/g,""))} placeholder="예) 3000000"
             onFocus={e=>e.target.style.borderColor="#2563eb"} onBlur={e=>e.target.style.borderColor="#e5e7eb"}/>
         </div>
         <div style={{marginBottom:20}}>
-          <div style={lbl}>브랜드 색상</div>
+          <label style={lbl}>브랜드 색상</label>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             {BRAND_COLORS.map(c=>(
-              <div key={c} onClick={()=>setColor(c)}
-                style={{width:28,height:28,borderRadius:7,background:c,cursor:"pointer",
-                  border:color===c?"2.5px solid #1a1d23":"2.5px solid transparent",
-                  transform:color===c?"scale(1.12)":"none",transition:"transform .15s"}}/>
+              <div key={c} onClick={()=>setColor(c)} style={{width:28,height:28,borderRadius:7,background:c,cursor:"pointer",
+                border:color===c?"2.5px solid #1a1d23":"2.5px solid transparent",transform:color===c?"scale(1.1)":"none",transition:".15s"}}/>
             ))}
           </div>
         </div>
-
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
-          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"transparent",fontSize:13,fontWeight:600,cursor:"pointer",color:"#6b7280"}}>취소</button>
-          <button onClick={handleSave} disabled={saving}
-            style={{padding:"9px 20px",borderRadius:8,border:"none",background:saving?"#93c5fd":"#2563eb",color:"#fff",fontSize:13,fontWeight:700,cursor:saving?"not-allowed":"pointer"}}>
-            {saving?"저장 중...":"저장"}
-          </button>
+          <button onClick={onClose} style={{...btn("#f3f4f6","#6b7280")}}>취소</button>
+          <button onClick={save} disabled={saving} style={{...btn(),opacity:saving?.7:1}}>{saving?"저장 중...":"저장"}</button>
         </div>
       </div>
     </div>
   );
 }
 
-/* ──────── Toast 알림 ──────── */
-function Toast({toasts}){
-  return(
-    <div style={{position:"fixed",bottom:24,right:24,zIndex:999,display:"flex",flexDirection:"column",gap:10}}>
-      {toasts.map(t=>(
-        <div key={t.id} style={{
-          display:"flex",alignItems:"center",gap:10,
-          padding:"12px 18px",borderRadius:12,
-          background:t.type==="success"?"#16a34a":t.type==="error"?"#e35353":"#2563eb",
-          color:"#fff",fontSize:13,fontWeight:600,
-          boxShadow:"0 4px 20px rgba(0,0,0,.15)",
-          minWidth:240,maxWidth:360,
-          animation:"slideIn .2s ease"
-        }}>
-          <span style={{fontSize:16}}>{t.type==="success"?"✓":t.type==="error"?"✕":"ℹ"}</span>
-          <span>{t.message}</span>
-        </div>
-      ))}
-      <style>{`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
-    </div>
-  );
-}
+/* ─── 광고주 관리 페이지 ─── */
+function AccountsPage({advertisers,onReload,isAdmin}){
+  const [advModal,setAdvModal]=useState(null);
+  const [chModal,setChModal]=useState(null);
+  const {toasts,toast}=useToast();
 
-function useToast(){
-  const [toasts,setToasts]=useState([]);
-  const show=(message,type="success")=>{
-    const id=Date.now();
-    setToasts(prev=>[...prev,{id,message,type}]);
-    setTimeout(()=>setToasts(prev=>prev.filter(t=>t.id!==id)),3500);
-  };
-  return {toasts, showToast:show};
-}
-
-/* ──────── Accounts Page ──────── */
-function AccountsPage({advertisers,setAdvertisers,onReload,isAdmin}){
-  const [modal,setModal]=useState(null);
-  const [channelModal,setChannelModal]=useState(null); // {advertiserId, channel}
-  const [saving,setSaving]=useState(false);
-  const [testStatus,setTestStatus]=useState({});
-  const channels=["meta","naver","google","daangn","tiktok","kakao"];
-  const {toasts,showToast}=useToast();
-
-  const handleSave=async(data)=>{
-    setSaving(true);
-    try {
-      if(modal==="add"){
-        const created = await apiFetch("/advertisers", {
-          method:"POST",
-          body: JSON.stringify({ name:data.name, brand_color:data.color, monthly_budget:data.budget, accounts:[] })
-        });
-        showToast(`${data.name} 광고주가 등록됐습니다`, "success");
-      } else {
-        await apiFetch(`/advertisers/${modal.id}`, {
-          method:"PUT",
-          body: JSON.stringify({ name:data.name, brand_color:data.color, monthly_budget:data.budget })
-        });
-        showToast(`${data.name} 정보가 저장됐습니다`, "success");
-      }
-      await onReload();
-      setModal(null);
-    } catch(e) {
-      showToast("저장 실패: "+e.message, "error");
-    } finally {
-      setSaving(false);
+  const saveAdv=async(data)=>{
+    if(advModal==="add"){
+      await api("/advertisers",{method:"POST",body:JSON.stringify({name:data.name,brand_color:data.color,monthly_budget:data.budget,accounts:[]})});
+      toast(`${data.name} 등록 완료`);
+    }else{
+      await api(`/advertisers/${advModal.id}`,{method:"PUT",body:JSON.stringify({name:data.name,brand_color:data.color,monthly_budget:data.budget})});
+      toast(`${data.name} 수정 완료`);
     }
+    await onReload();setAdvModal(null);
   };
 
-  const handleDelete=async(id)=>{
-    if(!window.confirm("광고주를 삭제할까요?")) return;
-    try {
-      await apiFetch(`/advertisers/${id}`, { method:"DELETE" });
-      await onReload();
-    } catch(e) { alert("삭제 실패: "+e.message); }
+  const deleteAdv=async(adv)=>{
+    if(!window.confirm(`"${adv.name}"을(를) 삭제할까요?`))return;
+    await api(`/advertisers/${adv.id}`,{method:"DELETE"});
+    toast(`${adv.name} 삭제됨`,"error");
+    await onReload();
   };
 
-  const handleTest=async(advertiserId, channel, credentials)=>{
-    const key=`${advertiserId}_${channel}`;
-    setTestStatus(s=>({...s,[key]:{loading:true}}));
-    try {
-      const result = await apiFetch(`/advertisers/${advertiserId}/channels/${channel}/test`, {
-        method:"POST", body: JSON.stringify({ credentials })
-      });
-      setTestStatus(s=>({...s,[key]:{loading:false,...result}}));
+  const handleTest=async(advertiserId,channel,accounts)=>{
+    try{
+      const r=await api(`/advertisers/${advertiserId}/channels/${channel}/test`,{method:"POST",body:JSON.stringify({credentials:{}})});
+      toast(r.ok?`${CH_LABEL[channel]} 연동 확인됨`:`${CH_LABEL[channel]}: ${r.message}`,r.ok?"success":"error");
       await onReload();
-    } catch(e) {
-      setTestStatus(s=>({...s,[key]:{loading:false,ok:false,message:e.message}}));
-    }
+    }catch(e){toast(e.message,"error");}
   };
 
   return(
     <div>
-      <Toast toasts={toasts}/>
+      <Toasts toasts={toasts}/>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22}}>
         <div>
           <div style={{fontWeight:700,fontSize:20}}>광고주 관리</div>
           <div style={{fontSize:13,color:"#9ca3af",marginTop:4}}>광고주별 채널 API 키를 등록하면 대시보드에 자동 통합됩니다</div>
         </div>
-        <button onClick={()=>setModal("add")} style={{padding:"9px 18px",borderRadius:10,border:"none",background:"#2563eb",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-          + 광고주 추가
-        </button>
+        {isAdmin&&<button onClick={()=>setAdvModal("add")} style={{...btn()}}>+ 광고주 추가</button>}
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:16}}>
+      {/* 광고주 카드 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:16,marginBottom:24}}>
         {advertisers.map(adv=>{
-          const connCnt=channels.filter(ch=>adv.accounts?.[ch]?.connected).length;
-          const p=adv.budget>0?adv.stats.cost/adv.budget*100:0;
+          const connCnt=CHANNELS.filter(ch=>adv.accounts?.[ch]?.connected).length;
           return(
             <div key={adv.id} style={{...card,position:"relative"}}>
-              <div style={{position:"absolute",top:18,right:18,display:"flex",gap:6}}>
-                <button onClick={()=>setModal(adv)} style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid #e5e7eb",background:"transparent",fontSize:12,fontWeight:600,cursor:"pointer",color:"#6b7280"}}>편집</button>
-                <button onClick={()=>handleDelete(adv.id)} style={{padding:"5px 12px",borderRadius:7,border:"none",background:"#fdecec",fontSize:12,fontWeight:600,cursor:"pointer",color:"#e35353"}}>삭제</button>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
-                <div style={{width:40,height:40,borderRadius:11,background:adv.color,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:16,flexShrink:0}}>
-                  {adv.name[0]}
+              {isAdmin&&(
+                <div style={{position:"absolute",top:16,right:16,display:"flex",gap:6}}>
+                  <button onClick={()=>setAdvModal(adv)} style={{...btn("#f3f4f6","#6b7280"),padding:"5px 12px",fontSize:12}}>편집</button>
+                  <button onClick={()=>deleteAdv(adv)} style={{...btn("#fdecec","#e35353"),padding:"5px 12px",fontSize:12}}>삭제</button>
                 </div>
+              )}
+              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+                <div style={{width:40,height:40,borderRadius:11,background:adv.color,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:16,flexShrink:0}}>{adv.name[0]}</div>
                 <div>
                   <div style={{fontWeight:700,fontSize:15}}>{adv.name}</div>
                   <div style={{fontSize:12,color:"#9ca3af",marginTop:2}}>채널 {connCnt}개 연동</div>
                 </div>
               </div>
               <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
-                {channels.map(ch=>{
+                {CHANNELS.map(ch=>{
                   const acc=adv.accounts?.[ch];
                   const connected=acc?.connected;
-                  const status=acc?.status||"pending";
+                  const isError=acc?.status==="error";
                   return(
-                    <span key={ch} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"5px 10px",borderRadius:6,fontSize:11,fontWeight:700,
-                      background:connected?"#eafaf0":status==="error"?"#fdecec":"#f3f4f6",
-                      color:connected?"#16a34a":status==="error"?"#e35353":"#9ca3af"}}>
-                      <span style={{width:6,height:6,borderRadius:"50%",background:connected?"#16a34a":status==="error"?"#e35353":"#d1d5db"}}/>
-                      {CHANNEL_LABELS[ch]}
-                      {connected?" 연결됨":status==="error"?" 오류":""}
+                    <span key={ch} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"4px 9px",borderRadius:6,fontSize:11,fontWeight:700,
+                      background:connected?"#eafaf0":isError?"#fdecec":"#f3f4f6",
+                      color:connected?"#16a34a":isError?"#e35353":"#9ca3af"}}>
+                      <span style={{width:5,height:5,borderRadius:"50%",background:connected?"#16a34a":isError?"#e35353":"#d1d5db"}}/>
+                      {CH_LABEL[ch]}{connected?" 연결됨":""}
                     </span>
                   );
                 })}
               </div>
-              <div style={{paddingTop:13,borderTop:"1px solid #f0f2f5",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-                {[["이번 달 광고비",fmtW(adv.stats.cost),"#1a1d23"],["월 예산",adv.budget?fmtW(adv.budget):"-","#1a1d23"],["소진율",adv.budget?p.toFixed(1)+"%":"-","#16a34a"]].map(([l,v,c])=>(
-                  <div key={l}>
-                    <div style={{fontSize:11,color:"#9ca3af",marginBottom:3}}>{l}</div>
-                    <div style={{fontSize:14,fontWeight:700,color:c}}>{v}</div>
-                  </div>
-                ))}
+              <div style={{paddingTop:12,borderTop:"1px solid #f0f2f5",display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:3}}>월 예산</div><div style={{fontSize:14,fontWeight:700}}>{adv.budget?`₩${adv.budget.toLocaleString()}`:"-"}</div></div>
+                <div><div style={{fontSize:11,color:"#9ca3af",marginBottom:3}}>연동 채널</div><div style={{fontSize:14,fontWeight:700,color:"#16a34a"}}>{connCnt}개</div></div>
               </div>
             </div>
           );
         })}
-
-        {/* Empty add card */}
-        <div onClick={()=>setModal("add")} style={{...card,border:"2px dashed #e5e7eb",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",minHeight:180,color:"#d1d5db",transition:".15s"}}
-             onMouseEnter={e=>{e.currentTarget.style.borderColor="#9ca3af";e.currentTarget.style.color="#9ca3af";}}
-             onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.color="#d1d5db";}}>
-          <div style={{fontSize:28,marginBottom:8}}>＋</div>
-          <div style={{fontSize:14}}>새 광고주 추가</div>
-          <div style={{fontSize:12,marginTop:4}}>클릭하여 등록하세요</div>
-        </div>
+        {isAdmin&&(
+          <div onClick={()=>setAdvModal("add")} style={{...card,border:"2px dashed #e5e7eb",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",minHeight:180,color:"#d1d5db"}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor="#9ca3af";e.currentTarget.style.color="#9ca3af";}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.color="#d1d5db";}}>
+            <div style={{fontSize:28,marginBottom:8}}>＋</div>
+            <div style={{fontSize:14}}>새 광고주 추가</div>
+          </div>
+        )}
       </div>
 
-      {/* 채널별 연동 상세 현황 */}
-      {advertisers.length>0&&(
-        <div style={{marginTop:28}}>
-          <div style={{fontWeight:700,fontSize:16,marginBottom:14}}>채널별 연동 현황</div>
-          {advertisers.map(adv=>(
-            <div key={adv.id} style={{...card,marginBottom:14}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,paddingBottom:14,borderBottom:"1px solid #f0f2f5"}}>
-                <div style={{width:32,height:32,borderRadius:9,background:adv.color,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:14}}>{adv.name[0]}</div>
-                <div style={{fontWeight:700,fontSize:15}}>{adv.name}</div>
-              </div>
-              {channels.map(ch=>{
-                const acc=adv.accounts?.[ch];
-                const connected=acc?.connected;
-                const status=acc?.status||"pending";
-                const key=`${adv.id}_${ch}`;
-                const ts=testStatus[key];
-                return(
-                  <div key={ch} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:"1px solid #f9fafb"}}>
-                    {/* 채널 아이콘 */}
-                    <div style={{width:28,height:28,borderRadius:7,background:COLORS[ch],display:"flex",alignItems:"center",justifyContent:"center",color:ch==="kakao"?"#111":"#fff",fontSize:11,fontWeight:700,flexShrink:0}}>
-                      {ch==="daangn"?"당":ch[0].toUpperCase()}
-                    </div>
-                    {/* 채널명 + 상태 */}
-                    <div style={{flex:1}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <span style={{fontWeight:600,fontSize:13}}>{CHANNEL_LABELS[ch]}</span>
-                        <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:999,
-                          background:connected?"#eafaf0":status==="error"?"#fdecec":"#f3f4f6",
-                          color:connected?"#16a34a":status==="error"?"#e35353":"#9ca3af"}}>
-                          {connected?"● 연결됨":status==="error"?"● 오류":"○ 미연동"}
-                        </span>
-                        {ts&&!ts.loading&&(
-                          <span style={{fontSize:11,color:ts.ok?"#16a34a":"#e35353"}}>{ts.message}</span>
-                        )}
-                      </div>
-                    </div>
-                    {/* 연동 테스트 버튼 */}
-                    {connected&&(
-                      <button
-                        onClick={()=>handleTest(adv.id, ch, adv.accounts[ch])}
-                        disabled={ts?.loading}
-                        style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",color:"#6b7280",flexShrink:0}}>
-                        {ts?.loading?"테스트 중...":"연동 테스트"}
-                      </button>
-                    )}
-                    {!connected&&(
-                      <button
-                        onClick={()=>setChannelModal({advertiserId:adv.id, channel:ch})}
-                        style={{padding:"5px 12px",borderRadius:7,border:"1.5px solid #2563eb",background:"#eaf1ff",fontSize:11,fontWeight:600,cursor:"pointer",color:"#2563eb",flexShrink:0}}>
-                        키 등록
-                      </button>
+      {/* 채널별 연동 현황 */}
+      <div style={{fontWeight:700,fontSize:16,marginBottom:14}}>채널별 연동 현황</div>
+      {advertisers.map(adv=>(
+        <div key={adv.id} style={{...card,marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,paddingBottom:12,borderBottom:"1px solid #f0f2f5"}}>
+            <div style={{width:32,height:32,borderRadius:9,background:adv.color,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:14}}>{adv.name[0]}</div>
+            <div style={{fontWeight:700,fontSize:15}}>{adv.name}</div>
+          </div>
+          {CHANNELS.map(ch=>{
+            const acc=adv.accounts?.[ch];
+            const connected=acc?.connected;
+            const isError=acc?.status==="error";
+            return(
+              <div key={ch} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 0",borderBottom:"1px solid #f9fafb"}}>
+                <div style={{width:28,height:28,borderRadius:7,background:CH_COLOR[ch],display:"flex",alignItems:"center",justifyContent:"center",color:ch==="kakao"?"#111":"#fff",fontSize:11,fontWeight:700,flexShrink:0}}>
+                  {ch==="daangn"?"당":ch[0].toUpperCase()}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontWeight:600,fontSize:13}}>{CH_LABEL[ch]}</span>
+                    <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:999,
+                      background:connected?"#eafaf0":isError?"#fdecec":"#f3f4f6",
+                      color:connected?"#16a34a":isError?"#e35353":"#9ca3af"}}>
+                      {connected?"● 연결됨":isError?"● 오류":"○ 미연동"}
+                    </span>
+                    {acc?.last_synced_at&&connected&&(
+                      <span style={{fontSize:10,color:"#9ca3af"}}>마지막 수집: {new Date(acc.last_synced_at).toLocaleDateString("ko-KR")}</span>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          ))}
+                  {isError&&acc?.error_message&&(
+                    <div style={{fontSize:11,color:"#e35353",marginTop:3}}>{acc.error_message.slice(0,80)}</div>
+                  )}
+                </div>
+                {connected?(
+                  <button onClick={()=>handleTest(adv.id,ch,adv.accounts)}
+                    style={{...btn("#f3f4f6","#6b7280"),padding:"5px 12px",fontSize:11,flexShrink:0}}>
+                    연동 테스트
+                  </button>
+                ):(
+                  <button onClick={()=>setChModal({advertiserId:adv.id,channel:ch})}
+                    style={{...btn("#eaf1ff","#2563eb"),padding:"5px 12px",fontSize:11,border:"1.5px solid #2563eb",flexShrink:0}}>
+                    키 등록
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
-      )}
+      ))}
 
-      {modal&&(
-        <AdvModal adv={modal==="add"?null:modal} onSave={handleSave} onClose={()=>setModal(null)}/>
-      )}
-      {channelModal&&(
+      {/* 모달 */}
+      {advModal&&<AdvModal adv={advModal==="add"?null:advModal} onSave={saveAdv} onClose={()=>setAdvModal(null)}/>}
+      {chModal&&(
         <ChannelKeyModal
-          advertiserId={channelModal.advertiserId}
-          channel={channelModal.channel}
-          onClose={()=>setChannelModal(null)}
-          onSuccess={()=>{ showToast(`${CHANNEL_LABELS[channelModal.channel]} 연동 완료!`,"success"); onReload(); }}
+          advertiserId={chModal.advertiserId}
+          channel={chModal.channel}
+          onClose={()=>setChModal(null)}
+          onSuccess={msg=>{toast(`${CH_LABEL[chModal.channel]} 연동 완료!`);onReload();}}
         />
       )}
     </div>
   );
 }
 
-/* ──────── Logs Page ──────── */
+/* ─── 알림/로그 페이지 ─── */
 function LogsPage(){
   const [logs,setLogs]=useState([]);
   const [loading,setLoading]=useState(true);
   const [filter,setFilter]=useState("all");
 
-  const loadLogs=async()=>{
+  const load=useCallback(async()=>{
     setLoading(true);
-    try {
-      const data=await apiFetch("/logs?limit=100");
-      setLogs(data||[]);
-    } catch(e){ console.error(e); }
-    finally{ setLoading(false); }
-  };
+    try{const d=await api("/logs?limit=100");setLogs(d||[]);}
+    catch(e){console.error(e);}
+    finally{setLoading(false);}
+  },[]);
 
-  useEffect(()=>{ loadLogs(); },[]);
+  useEffect(()=>{load();},[]);
 
-  const statusConfig={
-    success:{color:"#16a34a",bg:"#eafaf0",label:"성공"},
-    error:  {color:"#e35353",bg:"#fdecec",label:"오류"},
-    warning:{color:"#f59e0b",bg:"#fff8ec",label:"경고"},
-    info:   {color:"#2563eb",bg:"#eaf1ff",label:"정보"},
-  };
-
-  const typeConfig={
-    batch:  {icon:"⚙",label:"배치"},
-    connect:{icon:"🔗",label:"연동"},
-    error:  {icon:"❌",label:"오류"},
-    info:   {icon:"ℹ",label:"정보"},
-    warning:{icon:"⚠",label:"경고"},
-  };
-
-  const CHANNEL_COLORS={meta:"#2563eb",naver:"#16a34a",google:"#ea4335",daangn:"#ff6f0f",tiktok:"#111827",kakao:"#ca8a04"};
-  const CHANNEL_NAMES={meta:"Meta",naver:"네이버",google:"구글",daangn:"당근",tiktok:"틱톡",kakao:"카카오"};
-
+  const SC={success:{c:"#16a34a",bg:"#eafaf0",l:"성공"},error:{c:"#e35353",bg:"#fdecec",l:"오류"},warning:{c:"#f59e0b",bg:"#fff8ec",l:"경고"},info:{c:"#2563eb",bg:"#eaf1ff",l:"정보"}};
+  const TC={batch:"⚙",connect:"🔗",error:"❌",info:"ℹ",warning:"⚠"};
   const filtered=filter==="all"?logs:logs.filter(l=>l.status===filter||l.type===filter);
-
-  const formatTime=(ts)=>{
-    const d=new Date(ts);
-    return d.toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
-  };
+  const fmt=ts=>new Date(ts).toLocaleString("ko-KR",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
 
   return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
         <div>
           <div style={{fontWeight:700,fontSize:20}}>알림 / 로그</div>
-          <div style={{fontSize:13,color:"#9ca3af",marginTop:4}}>배치 실행, 채널 연동, 오류 내역을 확인하세요</div>
+          <div style={{fontSize:13,color:"#9ca3af",marginTop:4}}>배치 실행, 채널 연동, 오류 내역</div>
         </div>
-        <button onClick={loadLogs} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",color:"#6b7280"}}>
-          🔄 새로고침
-        </button>
+        <button onClick={load} style={{...btn("#f3f4f6","#6b7280")}}>🔄 새로고침</button>
       </div>
-
-      {/* 필터 탭 */}
       <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
         {[["all","전체"],["success","성공"],["error","오류"],["warning","경고"],["batch","배치"],["connect","연동"]].map(([v,l])=>(
           <button key={v} onClick={()=>setFilter(v)}
             style={{padding:"6px 14px",borderRadius:20,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",
               background:filter===v?"#2563eb":"#f3f4f6",color:filter===v?"#fff":"#6b7280"}}>
-            {l} {filter===v&&`(${filtered.length})`}
+            {l}{filter===v?` (${filtered.length})`:""}
           </button>
         ))}
       </div>
-
-      {loading?(
-        <div style={{textAlign:"center",padding:40,color:"#9ca3af"}}>불러오는 중...</div>
-      ):filtered.length===0?(
-        <div style={{...card,textAlign:"center",padding:40,color:"#9ca3af"}}>
-          <div style={{fontSize:32,marginBottom:12}}>📋</div>
-          <div>로그가 없습니다</div>
-        </div>
-      ):(
+      {loading?<div style={{display:"flex",justifyContent:"center",padding:40}}><Spinner/></div>
+      :filtered.length===0?<div style={{...card,textAlign:"center",padding:40,color:"#9ca3af"}}><div style={{fontSize:32,marginBottom:12}}>📋</div>로그가 없습니다</div>
+      :(
         <div style={{...card,padding:0,overflow:"hidden"}}>
           {filtered.map((log,i)=>{
-            const sc=statusConfig[log.status]||statusConfig.info;
-            const tc=typeConfig[log.type]||typeConfig.info;
+            const sc=SC[log.status]||SC.info;
             return(
-              <div key={log.id} style={{
-                display:"flex",alignItems:"flex-start",gap:14,
-                padding:"14px 20px",
-                borderBottom:i<filtered.length-1?"1px solid #f9fafb":"none",
-                background:i%2===0?"#fff":"#fafafa"
-              }}>
-                {/* 타입 아이콘 */}
-                <div style={{fontSize:18,flexShrink:0,marginTop:2}}>{tc.icon}</div>
-
-                {/* 내용 */}
+              <div key={log.id} style={{display:"flex",alignItems:"flex-start",gap:14,padding:"13px 20px",
+                borderBottom:i<filtered.length-1?"1px solid #f9fafb":"none",background:i%2===0?"#fff":"#fafafa"}}>
+                <div style={{fontSize:16,flexShrink:0,marginTop:1}}>{TC[log.type]||"ℹ"}</div>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
-                    {/* 상태 배지 */}
-                    <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:999,
-                      background:sc.bg,color:sc.color}}>
-                      {sc.label}
-                    </span>
-                    {/* 채널 배지 */}
-                    {log.channel&&(
-                      <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:999,
-                        background:CHANNEL_COLORS[log.channel]||"#6b7280",color:"#fff"}}>
-                        {CHANNEL_NAMES[log.channel]||log.channel}
-                      </span>
-                    )}
-                    {/* 광고주 */}
-                    {log.advertiser_name&&(
-                      <span style={{fontSize:11,color:"#9ca3af"}}>{log.advertiser_name}</span>
-                    )}
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+                    <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:999,background:sc.bg,color:sc.c}}>{sc.l}</span>
+                    {log.channel&&<span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:999,background:CH_COLOR[log.channel]||"#6b7280",color:"#fff"}}>{CH_LABEL[log.channel]||log.channel}</span>}
+                    {log.advertiser_name&&<span style={{fontSize:11,color:"#9ca3af"}}>{log.advertiser_name}</span>}
                   </div>
-                  <div style={{fontSize:13,fontWeight:600,color:"#1a1d23",marginBottom:log.detail?4:0}}>
-                    {log.message}
-                  </div>
-                  {log.detail&&log.detail!==log.message&&(
-                    <div style={{fontSize:11,color:"#9ca3af",wordBreak:"break-all"}}>{log.detail}</div>
-                  )}
+                  <div style={{fontSize:13,fontWeight:600,color:"#1a1d23",marginBottom:log.detail?3:0}}>{log.message}</div>
+                  {log.detail&&log.detail!==log.message&&<div style={{fontSize:11,color:"#9ca3af",wordBreak:"break-all"}}>{log.detail.slice(0,120)}</div>}
                 </div>
-
-                {/* 시간 */}
-                <div style={{fontSize:11,color:"#9ca3af",flexShrink:0,marginTop:2}}>
-                  {formatTime(log.created_at)}
-                </div>
+                <div style={{fontSize:11,color:"#9ca3af",flexShrink:0,marginTop:1}}>{fmt(log.created_at)}</div>
               </div>
             );
           })}
@@ -902,10 +749,10 @@ function LogsPage(){
   );
 }
 
-/* ──────── Placeholder ──────── */
-function Placeholder({label}){
+/* ─── 준비중 페이지 ─── */
+function ComingSoon({label}){
   return(
-    <div style={{...card,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:320,color:"#d1d5db"}}>
+    <div style={{...card,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:300,color:"#d1d5db"}}>
       <div style={{fontSize:40,marginBottom:12}}>🚧</div>
       <div style={{fontSize:16,fontWeight:600,color:"#9ca3af"}}>{label}</div>
       <div style={{fontSize:13,marginTop:6}}>준비 중입니다</div>
@@ -913,186 +760,67 @@ function Placeholder({label}){
   );
 }
 
-/* ──────── Login Page ──────── */
-function LoginPage({onLogin}){
-  const [email,setEmail]=useState("");
-  const [pw,setPw]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [error,setError]=useState("");
-
-  const handleSubmit=async(e)=>{
-    e.preventDefault();
-    setLoading(true); setError("");
-    try {
-      const user = await apiLogin(email, pw);
-      onLogin(user);
-    } catch(e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return(
-    <div style={{minHeight:"100vh",background:"#f0f2f5",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{background:"#fff",borderRadius:18,padding:"40px 36px",width:400,boxShadow:"0 4px 24px rgba(0,0,0,.08)"}}>
-        {/* 로고 */}
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:32}}>
-          <div style={{width:42,height:42,borderRadius:12,background:"linear-gradient(135deg,#2563eb,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:16}}>AD</div>
-          <div>
-            <div style={{fontSize:18,fontWeight:700}}>광고관제소</div>
-            <div style={{fontSize:12,color:"#9ca3af"}}>Ad Control Center</div>
-          </div>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          <div style={{marginBottom:14}}>
-            <div style={{fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:6}}>이메일</div>
-            <input
-              style={{width:"100%",padding:"11px 14px",border:"1.5px solid #e5e7eb",borderRadius:9,fontSize:14,outline:"none",color:"#1a1d23"}}
-              type="email" placeholder="이메일 입력" value={email}
-              onChange={e=>setEmail(e.target.value)} required autoFocus
-              onFocus={e=>e.target.style.borderColor="#2563eb"}
-              onBlur={e=>e.target.style.borderColor="#e5e7eb"}
-            />
-          </div>
-          <div style={{marginBottom:20}}>
-            <div style={{fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:6}}>비밀번호</div>
-            <input
-              style={{width:"100%",padding:"11px 14px",border:"1.5px solid #e5e7eb",borderRadius:9,fontSize:14,outline:"none",color:"#1a1d23"}}
-              type="password" placeholder="비밀번호 입력" value={pw}
-              onChange={e=>setPw(e.target.value)} required
-              onFocus={e=>e.target.style.borderColor="#2563eb"}
-              onBlur={e=>e.target.style.borderColor="#e5e7eb"}
-            />
-          </div>
-          {error&&<div style={{background:"#fdecec",color:"#e35353",borderRadius:8,padding:"10px 14px",fontSize:13,marginBottom:14}}>{error}</div>}
-          <button type="submit" disabled={loading}
-            style={{width:"100%",padding:"12px",background:loading?"#93c5fd":"#2563eb",color:"#fff",border:"none",borderRadius:9,fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",transition:".15s"}}>
-            {loading?"로그인 중...":"로그인"}
-          </button>
-        </form>
-
-        <div style={{marginTop:24,padding:"16px",background:"#f9fafb",borderRadius:9,fontSize:12,color:"#6b7280"}}>
-          <div style={{fontWeight:600,marginBottom:4}}>최초 설정이 필요한 경우</div>
-          <div>관리자 계정이 없으면 아래 API로 생성하세요:</div>
-          <code style={{display:"block",marginTop:6,background:"#f0f2f5",padding:"6px 10px",borderRadius:6,fontSize:11,color:"#374151",wordBreak:"break-all"}}>
-            POST /api/auth/setup
-          </code>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
+/* ─── 앱 루트 ─── */
 function App(){
   const [page,setPage]=useState("dashboard");
+  const [user,setUser]=useState(getUser);
   const [advertisers,setAdvertisers]=useState([]);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState(null);
-  const [currentUser,setCurrentUser]=useState(getUser);
 
-  const handleLogin=(user)=>{ setCurrentUser(user); setLoading(true); };
-  const handleLogout=()=>{ clearToken(); clearUser(); setCurrentUser(null); setAdvertisers([]); };
-
-  const loadAdvertisers = async () => {
-    try {
-      const data = await apiFetch("/advertisers");
-      const mapped = (data||[]).map(adv => {
-        const accounts = {};
-        ["naver","meta","google","daangn","tiktok","kakao"].forEach(ch => {
-          const acc = (adv.accounts||[]).find(a=>a.channel===ch);
-          accounts[ch] = { connected: acc?.status==="connected", status: acc?.status||"pending" };
+  const loadAdvertisers=useCallback(async()=>{
+    try{
+      const data=await api("/advertisers");
+      setAdvertisers((data||[]).map(adv=>{
+        const accounts={};
+        CHANNELS.forEach(ch=>{
+          const acc=(adv.accounts||[]).find(a=>a.channel===ch);
+          accounts[ch]=acc?{connected:acc.status==="connected",status:acc.status,error_message:acc.error_message,last_synced_at:acc.last_synced_at}:{connected:false,status:"pending"};
         });
-        return { id: adv.id, name: adv.name, color: adv.brand_color, budget: Number(adv.monthly_budget||0), accounts, stats:{cost:0,impressions:0,clicks:0,conversions:0,convAmount:0} };
-      });
-      setAdvertisers(mapped);
-    } catch(e) { setError(e.message); }
-    finally { setLoading(false); }
-  };
+        return{id:adv.id,name:adv.name,color:adv.brand_color,budget:Number(adv.monthly_budget||0),accounts};
+      }));
+      setError(null);
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);}
+  },[]);
 
-  useEffect(()=>{ if(currentUser) loadAdvertisers(); else setLoading(false); }, [currentUser]);
+  useEffect(()=>{if(user)loadAdvertisers();else setLoading(false);},[user]);
 
-  if(!currentUser) return <LoginPage onLogin={handleLogin}/>;
+  const logout=()=>{clearAuth();setUser(null);setAdvertisers([]);};
+  const isAdmin=user?.role==="admin";
 
-  const isAdmin = currentUser.role==="admin";
+  if(!user)return<LoginPage onLogin={u=>{setUser(u);setLoading(true);}}/>;
 
-  const pageContent=()=>{
-    if(loading) return(
-      <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"60vh",flexDirection:"column",gap:16}}>
-        <div style={{width:36,height:36,border:"3px solid #e5e7eb",borderTop:"3px solid #2563eb",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-        <div style={{color:"#9ca3af",fontSize:14}}>데이터 불러오는 중...</div>
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+  const content=()=>{
+    if(loading)return(
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"60vh",gap:16}}>
+        <Spinner/><div style={{color:"#9ca3af",fontSize:14}}>불러오는 중...</div>
       </div>
     );
-    if(error) return(
+    if(error)return(
       <div style={{...card,textAlign:"center",padding:40}}>
         <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
-        <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>서버 연결 실패</div>
+        <div style={{fontWeight:700,marginBottom:8}}>서버 연결 실패</div>
         <div style={{color:"#9ca3af",fontSize:13,marginBottom:16}}>{error}</div>
-        <button onClick={loadAdvertisers} style={{padding:"8px 20px",background:"#2563eb",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600}}>다시 시도</button>
+        <button onClick={loadAdvertisers} style={btn()}>다시 시도</button>
       </div>
     );
-    if(page==="dashboard") return <Dashboard advertisers={advertisers}/>;
-    if(page==="accounts") return <AccountsPage advertisers={advertisers} setAdvertisers={setAdvertisers} onReload={loadAdvertisers} isAdmin={isAdmin}/>;
-    if(page==="alerts") return <LogsPage/>;
+    if(page==="dashboard")return<Dashboard advertisers={advertisers}/>;
+    if(page==="accounts")return<AccountsPage advertisers={advertisers} onReload={loadAdvertisers} isAdmin={isAdmin}/>;
+    if(page==="alerts")return<LogsPage/>;
     const found=NAV.find(n=>n.id===page)||NAV_DISABLED.find(n=>n.id===page);
-    return <Placeholder label={found?.label||page}/>;
+    return<ComingSoon label={found?.label||page}/>;
   };
 
   return(
     <div style={{display:"flex",height:"100vh"}}>
-      {/* Sidebar */}
-      <aside style={{width:228,background:"#15181f",flexShrink:0,display:"flex",flexDirection:"column",padding:"16px 10px",overflowY:"auto"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,padding:"4px 8px 16px"}}>
-          <div style={{width:32,height:32,borderRadius:9,background:"linear-gradient(135deg,#2563eb,#7c3aed)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700,fontSize:13,flexShrink:0}}>AD</div>
-          <div>
-            <div style={{fontSize:14,fontWeight:700,color:"#fff",lineHeight:1.2}}>광고관제소</div>
-            <div style={{fontSize:10,color:"#6b7280"}}>Ad Control Center</div>
-          </div>
-        </div>
-        {NAV.map(n=>(
-          <div key={n.id} onClick={()=>setPage(n.id)}
-            style={{display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:8,fontSize:13,cursor:"pointer",marginBottom:1,
-              background:page===n.id?"#262b35":"transparent",color:page===n.id?"#fff":"#8b939f",fontWeight:page===n.id?600:400,transition:".12s"}}>
-            <span style={{width:16,textAlign:"center",fontSize:13}}>{n.icon}</span>{n.label}
-          </div>
-        ))}
-        <div style={{height:1,background:"#262b35",margin:"12px 4px"}}/>
-        <div style={{fontSize:10,color:"#4b505c",padding:"4px 10px 6px",letterSpacing:".04em"}}>준비중 · 연동 예정</div>
-        {NAV_DISABLED.map(n=>(
-          <div key={n.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:8,fontSize:13,color:"#4b505c",marginBottom:1}}>
-            <span style={{width:16,textAlign:"center",fontSize:13}}>{n.icon}</span>{n.label}
-          </div>
-        ))}
-        {/* 사용자 정보 + 로그아웃 */}
-        <div style={{marginTop:"auto",paddingTop:12,borderTop:"1px solid #262b35"}}>
-          <div style={{padding:"8px 10px",borderRadius:8,background:"#1e2330"}}>
-            <div style={{fontSize:12,color:"#fff",fontWeight:600,marginBottom:2}}>{currentUser.name||currentUser.email}</div>
-            <div style={{fontSize:10,color:"#6b7280"}}>{isAdmin?"관리자":currentUser.advertiser_name||"광고주"}</div>
-          </div>
-          <div onClick={handleLogout} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 10px",borderRadius:8,fontSize:12,color:"#6b7280",cursor:"pointer",marginTop:4}}
-               onMouseEnter={e=>e.currentTarget.style.color="#e35353"}
-               onMouseLeave={e=>e.currentTarget.style.color="#6b7280"}>
-            ⎋ 로그아웃
-          </div>
-        </div>
-      </aside>
-
-      {/* Main */}
+      <Sidebar page={page} setPage={setPage} user={user} onLogout={logout}/>
       <main style={{flex:1,overflowY:"auto",padding:"24px 28px 48px",background:"#f0f2f5"}}>
-        {pageContent()}
+        {content()}
       </main>
     </div>
   );
 }
-
-/* shared styles */
-const card={background:"#fff",borderRadius:14,padding:"20px 22px",border:"1px solid #e9eaec"};
-const tabBtn={padding:"6px 11px",borderRadius:7,fontSize:12,cursor:"pointer",fontWeight:500};
-const lbl={fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:5};
-const inp={padding:"9px 12px",border:"1.5px solid #e5e7eb",borderRadius:8,fontSize:13,width:"100%",outline:"none",color:"#1a1d23",background:"#fff"};
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
