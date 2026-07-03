@@ -8,7 +8,7 @@ async function request(path, params, creds) {
 
 async function testConnection(creds) {
   const data = await request(`${creds.accountId}`, { fields: "name,account_status" }, creds);
-  return { ok: data.account_status === 1, message: data.account_status === 1 ? `?�동 ?�공 ??${data.name}` : `계정 ?�태 ?�상 (${data.account_status})` };
+  return { ok: data.account_status === 1, message: data.account_status === 1 ? `연동 성공 — ${data.name}` : `계정 상태 이상 (${data.account_status})` };
 }
 
 async function fetchStats(creds, startDate, endDate) {
@@ -33,5 +33,3 @@ async function fetchStats(creds, startDate, endDate) {
 }
 
 module.exports = { testConnection, fetchStats };
-
-
