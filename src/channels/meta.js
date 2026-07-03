@@ -25,9 +25,9 @@ async function fetchStats(creds, startDate, endDate) {
       date:             row.date_start,
       impressions:      Math.round(Number(row.impressions ?? 0)),
       clicks:           Math.round(Number(row.clicks ?? 0)),
-      cost:             Math.round(spend * 1350),
+      cost:             Math.round(spend), // 한국 계정은 이미 KRW로 반환
       conversions:      Math.round(Number((row.actions ?? []).find(a => a.action_type === "purchase")?.value ?? 0)),
-      conversionAmount: Math.round(convVal * 1350),
+      conversionAmount: Math.round(convVal), // 한국 계정은 이미 KRW로 반환
     };
   });
 }
