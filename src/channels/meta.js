@@ -18,14 +18,18 @@ async function fetchStats(creds, startDate, endDate) {
     time_range: JSON.stringify({ since: startDate, until: endDate }),
     level: "account",
   }, creds);
-  return (data?.data ?? []).map((row) => ({
-    date: row.date_start,
-    impressions: Number(row.impressions ?? 0),
-    clicks: Number(row.clicks ?? 0),
-    cost: Math.round(Number(row.spend ?? 0) * 1350),
-    conversions: Number((row.actions ?? []).find(a => a.action_type === "purchase")?.value ?? 0),
-    conversionAmount: Math.round(Number((row.action_values ?? []).find(a => a.action_type === "purchase")?.value ?? 0) * 1350),
-  }));
+  return (data?.data ?? []).map((row) => {
+    const spend = parseFloat(row.spend ?? 0);
+    const convVal = parseFloat((row.action_values ?? []).find(a => a.action_type === "purchase")?.value ?? 0);
+    return {
+      date:             row.date_start,
+      impressions:      Math.round(Number(row.impressions ?? 0)),
+      clicks:           Math.round(Number(row.clicks ?? 0)),
+      cost:             Math.round(spend * 1350),
+      conversions:      Math.round(Number((row.actions ?? []).find(a => a.action_type === "purchase")?.value ?? 0)),
+      conversionAmount: Math.round(convVal * 1350),
+    };
+  });
 }
 
 module.exports = { testConnection, fetchStats };
