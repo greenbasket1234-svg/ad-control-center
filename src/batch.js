@@ -18,31 +18,35 @@ async function upsertStats(advertiserId, channel, stats) {
   try {
     await client.query("BEGIN");
     for (const s of stats) {
-      const impr = Math.round(Number(s.impressions)||0);
-      const clk  = Math.round(Number(s.clicks)||0);
-      const cost = Math.round(Number(s.cost)||0);
-      const conv = Math.round(Number(s.conversions)||0);
-      const amt  = Math.round(Number(s.conversionAmount)||0);
+      // 모든 값을 JS에서 정수로 변환 후 단순 INSERT
+      const impr = Math.round(Number(s.impressions) || 0);
+      const clk  = Math.round(Number(s.clicks) || 0);
+      const cost = Math.round(Number(s.cost) || 0);
+      const conv = Math.round(Number(s.conversions) || 0);
+      const amt  = Math.round(Number(s.conversionAmount) || 0);
+
+      // 파생 지표는 JS에서 계산 (SQL 타입 추론 오류 방지)
+      const ctr  = impr > 0 ? parseFloat((clk / impr * 100).toFixed(4)) : 0;
+      const cpc  = clk  > 0 ? parseFloat((cost / clk).toFixed(2)) : 0;
+      const cpm  = impr > 0 ? parseFloat((cost / impr * 1000).toFixed(2)) : 0;
+      const roas = cost > 0 ? parseFloat((amt / cost * 100).toFixed(2)) : 0;
+
       await client.query(`
-        INSERT INTO daily_stats (advertiser_id,channel,date,impressions,clicks,cost,conversions,conversion_amount,ctr,cpc,cpm,roas,fetched_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
-          ROUND(CASE WHEN $4>0 THEN ($5::numeric/$4)*100 ELSE 0 END,4),
-          ROUND(CASE WHEN $5>0 THEN $6::numeric/$5 ELSE 0 END,2),
-          ROUND(CASE WHEN $4>0 THEN ($6::numeric/$4)*1000 ELSE 0 END,2),
-          ROUND(CASE WHEN $6>0 THEN ($8::numeric/$6)*100 ELSE 0 END,2),
-          NOW())
-        ON CONFLICT (advertiser_id,channel,date) DO UPDATE SET
-          impressions=$4,clicks=$5,cost=$6,conversions=$7,conversion_amount=$8,
-          ctr=ROUND(CASE WHEN $4>0 THEN ($5::numeric/$4)*100 ELSE 0 END,4),
-          cpc=ROUND(CASE WHEN $5>0 THEN $6::numeric/$5 ELSE 0 END,2),
-          cpm=ROUND(CASE WHEN $4>0 THEN ($6::numeric/$4)*1000 ELSE 0 END,2),
-          roas=ROUND(CASE WHEN $6>0 THEN ($8::numeric/$6)*100 ELSE 0 END,2),
-          fetched_at=NOW()`,
-        [advertiserId, channel, s.date, impr, clk, cost, conv, amt]);
+        INSERT INTO daily_stats
+          (advertiser_id, channel, date, impressions, clicks, cost, conversions, conversion_amount, ctr, cpc, cpm, roas, fetched_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+        ON CONFLICT (advertiser_id, channel, date) DO UPDATE SET
+          impressions=$4, clicks=$5, cost=$6, conversions=$7, conversion_amount=$8,
+          ctr=$9, cpc=$10, cpm=$11, roas=$12, fetched_at=NOW()
+      `, [advertiserId, channel, s.date, impr, clk, cost, conv, amt, ctr, cpc, cpm, roas]);
     }
     await client.query("COMMIT");
-  } catch(e) { await client.query("ROLLBACK"); throw e; }
-  finally { client.release(); }
+  } catch(e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 async function runBatch(mode = "yesterday") {
