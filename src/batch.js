@@ -17,20 +17,25 @@ async function upsertStats(advertiserId, channel, stats) {
   try {
     await client.query("BEGIN");
     for (const s of stats) {
-      const [impr,clk,cost,conv,amt] = [s.impressions||0, s.clicks||0, s.cost||0, s.conversions||0, s.conversionAmount||0];
+      const impr = Math.round(Number(s.impressions)||0);
+      const clk  = Math.round(Number(s.clicks)||0);
+      const cost = Math.round(Number(s.cost)||0);
+      const conv = Math.round(Number(s.conversions)||0);
+      const amt  = Math.round(Number(s.conversionAmount)||0);
       await client.query(`
         INSERT INTO daily_stats (advertiser_id,channel,date,impressions,clicks,cost,conversions,conversion_amount,ctr,cpc,cpm,roas,fetched_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
-          ROUND(($5::numeric/NULLIF($4,0))*100,4),
-          ROUND($6::numeric/NULLIF($5,0),2),
-          ROUND(($6::numeric/NULLIF($4,0))*1000,2),
-          ROUND(($8::numeric/NULLIF($6,0))*100,2), NOW())
+          ROUND(CASE WHEN $4>0 THEN ($5::numeric/$4)*100 ELSE 0 END,4),
+          ROUND(CASE WHEN $5>0 THEN $6::numeric/$5 ELSE 0 END,2),
+          ROUND(CASE WHEN $4>0 THEN ($6::numeric/$4)*1000 ELSE 0 END,2),
+          ROUND(CASE WHEN $6>0 THEN ($8::numeric/$6)*100 ELSE 0 END,2),
+          NOW())
         ON CONFLICT (advertiser_id,channel,date) DO UPDATE SET
           impressions=$4,clicks=$5,cost=$6,conversions=$7,conversion_amount=$8,
-          ctr=ROUND(($5::numeric/NULLIF($4,0))*100,4),
-          cpc=ROUND($6::numeric/NULLIF($5,0),2),
-          cpm=ROUND(($6::numeric/NULLIF($4,0))*1000,2),
-          roas=ROUND(($8::numeric/NULLIF($6,0))*100,2),
+          ctr=ROUND(CASE WHEN $4>0 THEN ($5::numeric/$4)*100 ELSE 0 END,4),
+          cpc=ROUND(CASE WHEN $5>0 THEN $6::numeric/$5 ELSE 0 END,2),
+          cpm=ROUND(CASE WHEN $4>0 THEN ($6::numeric/$4)*1000 ELSE 0 END,2),
+          roas=ROUND(CASE WHEN $6>0 THEN ($8::numeric/$6)*100 ELSE 0 END,2),
           fetched_at=NOW()`,
         [advertiserId, channel, s.date, impr, clk, cost, conv, amt]);
     }
