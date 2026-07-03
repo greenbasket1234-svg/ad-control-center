@@ -62,7 +62,11 @@ async function runBatch(mode = "yesterday") {
     try {
       const stats = await ch.fetchStats(creds, startDate, endDate);
       await upsertStats(acc.advertiser_id, acc.channel, stats);
-      await pool.query(`UPDATE ad_accounts SET last_synced_at=NOW(),error_message=NULL WHERE id=$1`, [acc.id]);
+      // 성공 시: last_synced_at만 업데이트, status는 건드리지 않음
+      await pool.query(
+        `UPDATE ad_accounts SET last_synced_at=NOW(), error_message=NULL WHERE id=$1`,
+        [acc.id]
+      );
       console.log(`  [완료] ${acc.name}/${acc.channel} ${stats.length}건`);
       await logger.batch(`데이터 수집 완료: ${stats.length}건`, {
         channel: acc.channel, advertiserId: acc.advertiser_id,
@@ -71,7 +75,11 @@ async function runBatch(mode = "yesterday") {
       ok++;
     } catch(e) {
       console.error(`  [오류] ${acc.name}/${acc.channel}: ${e.message}`);
-      await pool.query(`UPDATE ad_accounts SET status='error',error_message=$1 WHERE id=$2`, [e.message, acc.id]);
+      // 실패 시: error_message만 기록, status(연결됨)는 절대 변경하지 않음
+      await pool.query(
+        `UPDATE ad_accounts SET error_message=$1 WHERE id=$2`,
+        [e.message, acc.id]
+      );
       await logger.error(`데이터 수집 실패: ${e.message}`, {
         channel: acc.channel, advertiserId: acc.advertiser_id,
         advertiserName: acc.name, detail: e.message
